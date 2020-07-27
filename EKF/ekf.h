@@ -550,9 +550,6 @@ private:
 	// jacobian : 4x1 vector of partial derivatives of observation wrt each quaternion state
 	void updateQuaternion(const float innovation, const float variance, const float gate_sigma, const Vector4f& yaw_jacobian);
 
-	// shrinks the yaw axis uncertainty of quaternion covariances by fusing a zero innovation yaw observation
-	void shrinkYawVariance();
-
 	// fuse the yaw angle obtained from a dual antenna GPS unit
 	void fuseGpsAntYaw();
 
