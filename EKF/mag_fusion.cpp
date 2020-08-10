@@ -72,29 +72,24 @@ void Ekf::fuseMag()
 	SH_MAG[8] = 2.0f*magE*q3;
 
 	// rotate magnetometer earth field state into body frame
-	const Dcmf R_to_body = quat_to_invrotmat(_state.quat_nominal);
+	const Dcmf R_to_body = quatToInverseRotMat(_state.quat_nominal);
 
 	const Vector3f mag_I_rot = R_to_body * _state.mag_I;
 
 	// compute magnetometer innovations
-	_mag_innov[0] = (mag_I_rot(0) + _state.mag_B(0)) - _mag_sample_delayed.mag(0);
-	_mag_innov[1] = (mag_I_rot(1) + _state.mag_B(1)) - _mag_sample_delayed.mag(1);
+	_mag_innov = mag_I_rot + _state.mag_B - _mag_sample_delayed.mag;
 
 	// do not use the synthesized measurement for the magnetomter Z component for 3D fusion
 	if (_control_status.flags.synthetic_mag_z) {
-		_mag_innov[2] = 0.0f;
-	} else {
-		_mag_innov[2] = (mag_I_rot(2) + _state.mag_B(2)) - _mag_sample_delayed.mag(2);
+		_mag_innov(2) = 0.0f;
 	}
-	// Observation jacobian and Kalman gain vectors
-	float H_MAG[24];
-	float Kfusion[24];
 
 	// X axis innovation variance
-	_mag_innov_var[0] = (P(19,19) + R_MAG + P(1,19)*SH_MAG[0] - P(2,19)*SH_MAG[1] + P(3,19)*SH_MAG[2] - P(16,19)*(SH_MAG[3] + SH_MAG[4] - SH_MAG[5] - SH_MAG[6]) + (2.0f*q0*q3 + 2.0f*q1*q2)*(P(19,17) + P(1,17)*SH_MAG[0] - P(2,17)*SH_MAG[1] + P(3,17)*SH_MAG[2] - P(16,17)*(SH_MAG[3] + SH_MAG[4] - SH_MAG[5] - SH_MAG[6]) + P(17,17)*(2.0f*q0*q3 + 2.0f*q1*q2) - P(18,17)*(2.0f*q0*q2 - 2.0f*q1*q3) + P(0,17)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) - (2.0f*q0*q2 - 2.0f*q1*q3)*(P(19,18) + P(1,18)*SH_MAG[0] - P(2,18)*SH_MAG[1] + P(3,18)*SH_MAG[2] - P(16,18)*(SH_MAG[3] + SH_MAG[4] - SH_MAG[5] - SH_MAG[6]) + P(17,18)*(2.0f*q0*q3 + 2.0f*q1*q2) - P(18,18)*(2.0f*q0*q2 - 2.0f*q1*q3) + P(0,18)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) + (SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)*(P(19,0) + P(1,0)*SH_MAG[0] - P(2,0)*SH_MAG[1] + P(3,0)*SH_MAG[2] - P(16,0)*(SH_MAG[3] + SH_MAG[4] - SH_MAG[5] - SH_MAG[6]) + P(17,0)*(2.0f*q0*q3 + 2.0f*q1*q2) - P(18,0)*(2.0f*q0*q2 - 2.0f*q1*q3) + P(0,0)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) + P(17,19)*(2.0f*q0*q3 + 2.0f*q1*q2) - P(18,19)*(2.0f*q0*q2 - 2.0f*q1*q3) + SH_MAG[0]*(P(19,1) + P(1,1)*SH_MAG[0] - P(2,1)*SH_MAG[1] + P(3,1)*SH_MAG[2] - P(16,1)*(SH_MAG[3] + SH_MAG[4] - SH_MAG[5] - SH_MAG[6]) + P(17,1)*(2.0f*q0*q3 + 2.0f*q1*q2) - P(18,1)*(2.0f*q0*q2 - 2.0f*q1*q3) + P(0,1)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) - SH_MAG[1]*(P(19,2) + P(1,2)*SH_MAG[0] - P(2,2)*SH_MAG[1] + P(3,2)*SH_MAG[2] - P(16,2)*(SH_MAG[3] + SH_MAG[4] - SH_MAG[5] - SH_MAG[6]) + P(17,2)*(2.0f*q0*q3 + 2.0f*q1*q2) - P(18,2)*(2.0f*q0*q2 - 2.0f*q1*q3) + P(0,2)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) + SH_MAG[2]*(P(19,3) + P(1,3)*SH_MAG[0] - P(2,3)*SH_MAG[1] + P(3,3)*SH_MAG[2] - P(16,3)*(SH_MAG[3] + SH_MAG[4] - SH_MAG[5] - SH_MAG[6]) + P(17,3)*(2.0f*q0*q3 + 2.0f*q1*q2) - P(18,3)*(2.0f*q0*q2 - 2.0f*q1*q3) + P(0,3)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) - (SH_MAG[3] + SH_MAG[4] - SH_MAG[5] - SH_MAG[6])*(P(19,16) + P(1,16)*SH_MAG[0] - P(2,16)*SH_MAG[1] + P(3,16)*SH_MAG[2] - P(16,16)*(SH_MAG[3] + SH_MAG[4] - SH_MAG[5] - SH_MAG[6]) + P(17,16)*(2.0f*q0*q3 + 2.0f*q1*q2) - P(18,16)*(2.0f*q0*q2 - 2.0f*q1*q3) + P(0,16)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) + P(0,19)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2));
+	_mag_innov_var(0) = (P(19,19) + R_MAG + P(1,19)*SH_MAG[0] - P(2,19)*SH_MAG[1] + P(3,19)*SH_MAG[2] - P(16,19)*(SH_MAG[3] + SH_MAG[4] - SH_MAG[5] - SH_MAG[6]) + (2.0f*q0*q3 + 2.0f*q1*q2)*(P(19,17) + P(1,17)*SH_MAG[0] - P(2,17)*SH_MAG[1] + P(3,17)*SH_MAG[2] - P(16,17)*(SH_MAG[3] + SH_MAG[4] - SH_MAG[5] - SH_MAG[6]) + P(17,17)*(2.0f*q0*q3 + 2.0f*q1*q2) - P(18,17)*(2.0f*q0*q2 - 2.0f*q1*q3) + P(0,17)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) - (2.0f*q0*q2 - 2.0f*q1*q3)*(P(19,18) + P(1,18)*SH_MAG[0] - P(2,18)*SH_MAG[1] + P(3,18)*SH_MAG[2] - P(16,18)*(SH_MAG[3] + SH_MAG[4] - SH_MAG[5] - SH_MAG[6]) + P(17,18)*(2.0f*q0*q3 + 2.0f*q1*q2) - P(18,18)*(2.0f*q0*q2 - 2.0f*q1*q3) + P(0,18)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) + (SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)*(P(19,0) + P(1,0)*SH_MAG[0] - P(2,0)*SH_MAG[1] + P(3,0)*SH_MAG[2] - P(16,0)*(SH_MAG[3] + SH_MAG[4] - SH_MAG[5] - SH_MAG[6]) + P(17,0)*(2.0f*q0*q3 + 2.0f*q1*q2) - P(18,0)*(2.0f*q0*q2 - 2.0f*q1*q3) + P(0,0)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) + P(17,19)*(2.0f*q0*q3 + 2.0f*q1*q2) - P(18,19)*(2.0f*q0*q2 - 2.0f*q1*q3) + SH_MAG[0]*(P(19,1) + P(1,1)*SH_MAG[0] - P(2,1)*SH_MAG[1] + P(3,1)*SH_MAG[2] - P(16,1)*(SH_MAG[3] + SH_MAG[4] - SH_MAG[5] - SH_MAG[6]) + P(17,1)*(2.0f*q0*q3 + 2.0f*q1*q2) - P(18,1)*(2.0f*q0*q2 - 2.0f*q1*q3) + P(0,1)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) - SH_MAG[1]*(P(19,2) + P(1,2)*SH_MAG[0] - P(2,2)*SH_MAG[1] + P(3,2)*SH_MAG[2] - P(16,2)*(SH_MAG[3] + SH_MAG[4] - SH_MAG[5] - SH_MAG[6]) + P(17,2)*(2.0f*q0*q3 + 2.0f*q1*q2) - P(18,2)*(2.0f*q0*q2 - 2.0f*q1*q3) + P(0,2)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) + SH_MAG[2]*(P(19,3) + P(1,3)*SH_MAG[0] - P(2,3)*SH_MAG[1] + P(3,3)*SH_MAG[2] - P(16,3)*(SH_MAG[3] + SH_MAG[4] - SH_MAG[5] - SH_MAG[6]) + P(17,3)*(2.0f*q0*q3 + 2.0f*q1*q2) - P(18,3)*(2.0f*q0*q2 - 2.0f*q1*q3) + P(0,3)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) - (SH_MAG[3] + SH_MAG[4] - SH_MAG[5] - SH_MAG[6])*(P(19,16) + P(1,16)*SH_MAG[0] - P(2,16)*SH_MAG[1] + P(3,16)*SH_MAG[2] - P(16,16)*(SH_MAG[3] + SH_MAG[4] - SH_MAG[5] - SH_MAG[6]) + P(17,16)*(2.0f*q0*q3 + 2.0f*q1*q2) - P(18,16)*(2.0f*q0*q2 - 2.0f*q1*q3) + P(0,16)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) + P(0,19)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2));
 	// check for a badly conditioned covariance matrix
+	const char* numerical_error_covariance_reset_string = "numerical error - covariance reset";
 
-	if (_mag_innov_var[0] >= R_MAG) {
+	if (_mag_innov_var(0) >= R_MAG) {
 		// the innovation variance contribution from the state covariances is non-negative - no fault
 		_fault_status.flags.bad_mag_x = false;
 
@@ -104,16 +99,16 @@ void Ekf::fuseMag()
 
 		// we need to re-initialise covariances and abort this fusion step
 		resetMagRelatedCovariances();
-		ECL_ERR_TIMESTAMPED("magX fusion numerical error - covariance reset");
+		ECL_ERR("magX %s", numerical_error_covariance_reset_string);
 		return;
 
 	}
 
 	// Y axis innovation variance
-	_mag_innov_var[1] = (P(20,20) + R_MAG + P(0,20)*SH_MAG[2] + P(1,20)*SH_MAG[1] + P(2,20)*SH_MAG[0] - P(17,20)*(SH_MAG[3] - SH_MAG[4] + SH_MAG[5] - SH_MAG[6]) - (2.0f*q0*q3 - 2.0f*q1*q2)*(P(20,16) + P(0,16)*SH_MAG[2] + P(1,16)*SH_MAG[1] + P(2,16)*SH_MAG[0] - P(17,16)*(SH_MAG[3] - SH_MAG[4] + SH_MAG[5] - SH_MAG[6]) - P(16,16)*(2.0f*q0*q3 - 2.0f*q1*q2) + P(18,16)*(2.0f*q0*q1 + 2.0f*q2*q3) - P(3,16)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) + (2.0f*q0*q1 + 2.0f*q2*q3)*(P(20,18) + P(0,18)*SH_MAG[2] + P(1,18)*SH_MAG[1] + P(2,18)*SH_MAG[0] - P(17,18)*(SH_MAG[3] - SH_MAG[4] + SH_MAG[5] - SH_MAG[6]) - P(16,18)*(2.0f*q0*q3 - 2.0f*q1*q2) + P(18,18)*(2.0f*q0*q1 + 2.0f*q2*q3) - P(3,18)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) - (SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)*(P(20,3) + P(0,3)*SH_MAG[2] + P(1,3)*SH_MAG[1] + P(2,3)*SH_MAG[0] - P(17,3)*(SH_MAG[3] - SH_MAG[4] + SH_MAG[5] - SH_MAG[6]) - P(16,3)*(2.0f*q0*q3 - 2.0f*q1*q2) + P(18,3)*(2.0f*q0*q1 + 2.0f*q2*q3) - P(3,3)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) - P(16,20)*(2.0f*q0*q3 - 2.0f*q1*q2) + P(18,20)*(2.0f*q0*q1 + 2.0f*q2*q3) + SH_MAG[2]*(P(20,0) + P(0,0)*SH_MAG[2] + P(1,0)*SH_MAG[1] + P(2,0)*SH_MAG[0] - P(17,0)*(SH_MAG[3] - SH_MAG[4] + SH_MAG[5] - SH_MAG[6]) - P(16,0)*(2.0f*q0*q3 - 2.0f*q1*q2) + P(18,0)*(2.0f*q0*q1 + 2.0f*q2*q3) - P(3,0)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) + SH_MAG[1]*(P(20,1) + P(0,1)*SH_MAG[2] + P(1,1)*SH_MAG[1] + P(2,1)*SH_MAG[0] - P(17,1)*(SH_MAG[3] - SH_MAG[4] + SH_MAG[5] - SH_MAG[6]) - P(16,1)*(2.0f*q0*q3 - 2.0f*q1*q2) + P(18,1)*(2.0f*q0*q1 + 2.0f*q2*q3) - P(3,1)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) + SH_MAG[0]*(P(20,2) + P(0,2)*SH_MAG[2] + P(1,2)*SH_MAG[1] + P(2,2)*SH_MAG[0] - P(17,2)*(SH_MAG[3] - SH_MAG[4] + SH_MAG[5] - SH_MAG[6]) - P(16,2)*(2.0f*q0*q3 - 2.0f*q1*q2) + P(18,2)*(2.0f*q0*q1 + 2.0f*q2*q3) - P(3,2)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) - (SH_MAG[3] - SH_MAG[4] + SH_MAG[5] - SH_MAG[6])*(P(20,17) + P(0,17)*SH_MAG[2] + P(1,17)*SH_MAG[1] + P(2,17)*SH_MAG[0] - P(17,17)*(SH_MAG[3] - SH_MAG[4] + SH_MAG[5] - SH_MAG[6]) - P(16,17)*(2.0f*q0*q3 - 2.0f*q1*q2) + P(18,17)*(2.0f*q0*q1 + 2.0f*q2*q3) - P(3,17)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) - P(3,20)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2));
+	_mag_innov_var(1) = (P(20,20) + R_MAG + P(0,20)*SH_MAG[2] + P(1,20)*SH_MAG[1] + P(2,20)*SH_MAG[0] - P(17,20)*(SH_MAG[3] - SH_MAG[4] + SH_MAG[5] - SH_MAG[6]) - (2.0f*q0*q3 - 2.0f*q1*q2)*(P(20,16) + P(0,16)*SH_MAG[2] + P(1,16)*SH_MAG[1] + P(2,16)*SH_MAG[0] - P(17,16)*(SH_MAG[3] - SH_MAG[4] + SH_MAG[5] - SH_MAG[6]) - P(16,16)*(2.0f*q0*q3 - 2.0f*q1*q2) + P(18,16)*(2.0f*q0*q1 + 2.0f*q2*q3) - P(3,16)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) + (2.0f*q0*q1 + 2.0f*q2*q3)*(P(20,18) + P(0,18)*SH_MAG[2] + P(1,18)*SH_MAG[1] + P(2,18)*SH_MAG[0] - P(17,18)*(SH_MAG[3] - SH_MAG[4] + SH_MAG[5] - SH_MAG[6]) - P(16,18)*(2.0f*q0*q3 - 2.0f*q1*q2) + P(18,18)*(2.0f*q0*q1 + 2.0f*q2*q3) - P(3,18)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) - (SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)*(P(20,3) + P(0,3)*SH_MAG[2] + P(1,3)*SH_MAG[1] + P(2,3)*SH_MAG[0] - P(17,3)*(SH_MAG[3] - SH_MAG[4] + SH_MAG[5] - SH_MAG[6]) - P(16,3)*(2.0f*q0*q3 - 2.0f*q1*q2) + P(18,3)*(2.0f*q0*q1 + 2.0f*q2*q3) - P(3,3)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) - P(16,20)*(2.0f*q0*q3 - 2.0f*q1*q2) + P(18,20)*(2.0f*q0*q1 + 2.0f*q2*q3) + SH_MAG[2]*(P(20,0) + P(0,0)*SH_MAG[2] + P(1,0)*SH_MAG[1] + P(2,0)*SH_MAG[0] - P(17,0)*(SH_MAG[3] - SH_MAG[4] + SH_MAG[5] - SH_MAG[6]) - P(16,0)*(2.0f*q0*q3 - 2.0f*q1*q2) + P(18,0)*(2.0f*q0*q1 + 2.0f*q2*q3) - P(3,0)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) + SH_MAG[1]*(P(20,1) + P(0,1)*SH_MAG[2] + P(1,1)*SH_MAG[1] + P(2,1)*SH_MAG[0] - P(17,1)*(SH_MAG[3] - SH_MAG[4] + SH_MAG[5] - SH_MAG[6]) - P(16,1)*(2.0f*q0*q3 - 2.0f*q1*q2) + P(18,1)*(2.0f*q0*q1 + 2.0f*q2*q3) - P(3,1)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) + SH_MAG[0]*(P(20,2) + P(0,2)*SH_MAG[2] + P(1,2)*SH_MAG[1] + P(2,2)*SH_MAG[0] - P(17,2)*(SH_MAG[3] - SH_MAG[4] + SH_MAG[5] - SH_MAG[6]) - P(16,2)*(2.0f*q0*q3 - 2.0f*q1*q2) + P(18,2)*(2.0f*q0*q1 + 2.0f*q2*q3) - P(3,2)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) - (SH_MAG[3] - SH_MAG[4] + SH_MAG[5] - SH_MAG[6])*(P(20,17) + P(0,17)*SH_MAG[2] + P(1,17)*SH_MAG[1] + P(2,17)*SH_MAG[0] - P(17,17)*(SH_MAG[3] - SH_MAG[4] + SH_MAG[5] - SH_MAG[6]) - P(16,17)*(2.0f*q0*q3 - 2.0f*q1*q2) + P(18,17)*(2.0f*q0*q1 + 2.0f*q2*q3) - P(3,17)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) - P(3,20)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2));
 
 	// check for a badly conditioned covariance matrix
-	if (_mag_innov_var[1] >= R_MAG) {
+	if (_mag_innov_var(1) >= R_MAG) {
 		// the innovation variance contribution from the state covariances is non-negative - no fault
 		_fault_status.flags.bad_mag_y = false;
 
@@ -123,38 +118,38 @@ void Ekf::fuseMag()
 
 		// we need to re-initialise covariances and abort this fusion step
 		resetMagRelatedCovariances();
-		ECL_ERR_TIMESTAMPED("magY fusion numerical error - covariance reset");
+		ECL_ERR("magY %s", numerical_error_covariance_reset_string);
 		return;
 
 	}
 
 	// Z axis innovation variance
-	_mag_innov_var[2] = (P(21,21) + R_MAG + P(0,21)*SH_MAG[1] - P(1,21)*SH_MAG[2] + P(3,21)*SH_MAG[0] + P(18,21)*(SH_MAG[3] - SH_MAG[4] - SH_MAG[5] + SH_MAG[6]) + (2.0f*q0*q2 + 2.0f*q1*q3)*(P(21,16) + P(0,16)*SH_MAG[1] - P(1,16)*SH_MAG[2] + P(3,16)*SH_MAG[0] + P(18,16)*(SH_MAG[3] - SH_MAG[4] - SH_MAG[5] + SH_MAG[6]) + P(16,16)*(2.0f*q0*q2 + 2.0f*q1*q3) - P(17,16)*(2.0f*q0*q1 - 2.0f*q2*q3) + P(2,16)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) - (2.0f*q0*q1 - 2.0f*q2*q3)*(P(21,17) + P(0,17)*SH_MAG[1] - P(1,17)*SH_MAG[2] + P(3,17)*SH_MAG[0] + P(18,17)*(SH_MAG[3] - SH_MAG[4] - SH_MAG[5] + SH_MAG[6]) + P(16,17)*(2.0f*q0*q2 + 2.0f*q1*q3) - P(17,17)*(2.0f*q0*q1 - 2.0f*q2*q3) + P(2,17)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) + (SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)*(P(21,2) + P(0,2)*SH_MAG[1] - P(1,2)*SH_MAG[2] + P(3,2)*SH_MAG[0] + P(18,2)*(SH_MAG[3] - SH_MAG[4] - SH_MAG[5] + SH_MAG[6]) + P(16,2)*(2.0f*q0*q2 + 2.0f*q1*q3) - P(17,2)*(2.0f*q0*q1 - 2.0f*q2*q3) + P(2,2)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) + P(16,21)*(2.0f*q0*q2 + 2.0f*q1*q3) - P(17,21)*(2.0f*q0*q1 - 2.0f*q2*q3) + SH_MAG[1]*(P(21,0) + P(0,0)*SH_MAG[1] - P(1,0)*SH_MAG[2] + P(3,0)*SH_MAG[0] + P(18,0)*(SH_MAG[3] - SH_MAG[4] - SH_MAG[5] + SH_MAG[6]) + P(16,0)*(2.0f*q0*q2 + 2.0f*q1*q3) - P(17,0)*(2.0f*q0*q1 - 2.0f*q2*q3) + P(2,0)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) - SH_MAG[2]*(P(21,1) + P(0,1)*SH_MAG[1] - P(1,1)*SH_MAG[2] + P(3,1)*SH_MAG[0] + P(18,1)*(SH_MAG[3] - SH_MAG[4] - SH_MAG[5] + SH_MAG[6]) + P(16,1)*(2.0f*q0*q2 + 2.0f*q1*q3) - P(17,1)*(2.0f*q0*q1 - 2.0f*q2*q3) + P(2,1)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) + SH_MAG[0]*(P(21,3) + P(0,3)*SH_MAG[1] - P(1,3)*SH_MAG[2] + P(3,3)*SH_MAG[0] + P(18,3)*(SH_MAG[3] - SH_MAG[4] - SH_MAG[5] + SH_MAG[6]) + P(16,3)*(2.0f*q0*q2 + 2.0f*q1*q3) - P(17,3)*(2.0f*q0*q1 - 2.0f*q2*q3) + P(2,3)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) + (SH_MAG[3] - SH_MAG[4] - SH_MAG[5] + SH_MAG[6])*(P(21,18) + P(0,18)*SH_MAG[1] - P(1,18)*SH_MAG[2] + P(3,18)*SH_MAG[0] + P(18,18)*(SH_MAG[3] - SH_MAG[4] - SH_MAG[5] + SH_MAG[6]) + P(16,18)*(2.0f*q0*q2 + 2.0f*q1*q3) - P(17,18)*(2.0f*q0*q1 - 2.0f*q2*q3) + P(2,18)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) + P(2,21)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2));
+	_mag_innov_var(2) = (P(21,21) + R_MAG + P(0,21)*SH_MAG[1] - P(1,21)*SH_MAG[2] + P(3,21)*SH_MAG[0] + P(18,21)*(SH_MAG[3] - SH_MAG[4] - SH_MAG[5] + SH_MAG[6]) + (2.0f*q0*q2 + 2.0f*q1*q3)*(P(21,16) + P(0,16)*SH_MAG[1] - P(1,16)*SH_MAG[2] + P(3,16)*SH_MAG[0] + P(18,16)*(SH_MAG[3] - SH_MAG[4] - SH_MAG[5] + SH_MAG[6]) + P(16,16)*(2.0f*q0*q2 + 2.0f*q1*q3) - P(17,16)*(2.0f*q0*q1 - 2.0f*q2*q3) + P(2,16)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) - (2.0f*q0*q1 - 2.0f*q2*q3)*(P(21,17) + P(0,17)*SH_MAG[1] - P(1,17)*SH_MAG[2] + P(3,17)*SH_MAG[0] + P(18,17)*(SH_MAG[3] - SH_MAG[4] - SH_MAG[5] + SH_MAG[6]) + P(16,17)*(2.0f*q0*q2 + 2.0f*q1*q3) - P(17,17)*(2.0f*q0*q1 - 2.0f*q2*q3) + P(2,17)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) + (SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)*(P(21,2) + P(0,2)*SH_MAG[1] - P(1,2)*SH_MAG[2] + P(3,2)*SH_MAG[0] + P(18,2)*(SH_MAG[3] - SH_MAG[4] - SH_MAG[5] + SH_MAG[6]) + P(16,2)*(2.0f*q0*q2 + 2.0f*q1*q3) - P(17,2)*(2.0f*q0*q1 - 2.0f*q2*q3) + P(2,2)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) + P(16,21)*(2.0f*q0*q2 + 2.0f*q1*q3) - P(17,21)*(2.0f*q0*q1 - 2.0f*q2*q3) + SH_MAG[1]*(P(21,0) + P(0,0)*SH_MAG[1] - P(1,0)*SH_MAG[2] + P(3,0)*SH_MAG[0] + P(18,0)*(SH_MAG[3] - SH_MAG[4] - SH_MAG[5] + SH_MAG[6]) + P(16,0)*(2.0f*q0*q2 + 2.0f*q1*q3) - P(17,0)*(2.0f*q0*q1 - 2.0f*q2*q3) + P(2,0)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) - SH_MAG[2]*(P(21,1) + P(0,1)*SH_MAG[1] - P(1,1)*SH_MAG[2] + P(3,1)*SH_MAG[0] + P(18,1)*(SH_MAG[3] - SH_MAG[4] - SH_MAG[5] + SH_MAG[6]) + P(16,1)*(2.0f*q0*q2 + 2.0f*q1*q3) - P(17,1)*(2.0f*q0*q1 - 2.0f*q2*q3) + P(2,1)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) + SH_MAG[0]*(P(21,3) + P(0,3)*SH_MAG[1] - P(1,3)*SH_MAG[2] + P(3,3)*SH_MAG[0] + P(18,3)*(SH_MAG[3] - SH_MAG[4] - SH_MAG[5] + SH_MAG[6]) + P(16,3)*(2.0f*q0*q2 + 2.0f*q1*q3) - P(17,3)*(2.0f*q0*q1 - 2.0f*q2*q3) + P(2,3)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) + (SH_MAG[3] - SH_MAG[4] - SH_MAG[5] + SH_MAG[6])*(P(21,18) + P(0,18)*SH_MAG[1] - P(1,18)*SH_MAG[2] + P(3,18)*SH_MAG[0] + P(18,18)*(SH_MAG[3] - SH_MAG[4] - SH_MAG[5] + SH_MAG[6]) + P(16,18)*(2.0f*q0*q2 + 2.0f*q1*q3) - P(17,18)*(2.0f*q0*q1 - 2.0f*q2*q3) + P(2,18)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2)) + P(2,21)*(SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2));
 
 	// check for a badly conditioned covariance matrix
-	if (_mag_innov_var[2] >= R_MAG) {
+	if (_mag_innov_var(2) >= R_MAG) {
 		// the innovation variance contribution from the state covariances is non-negative - no fault
 		_fault_status.flags.bad_mag_z = false;
 
-	} else if (_mag_innov_var[2] > 0.0f) {
+	} else {
 		// the innovation variance contribution from the state covariances is negative which means the covariance matrix is badly conditioned
 		_fault_status.flags.bad_mag_z = true;
 
 		// we need to re-initialise covariances and abort this fusion step
 		resetMagRelatedCovariances();
-		ECL_ERR_TIMESTAMPED("magZ fusion numerical error - covariance reset");
+		ECL_ERR("magZ %s", numerical_error_covariance_reset_string);
 		return;
 
 	}
 
 	// Perform an innovation consistency check and report the result
-	bool healthy = true;
+	bool all_innovation_checks_passed = true;
 
 	for (uint8_t index = 0; index <= 2; index++) {
-		_mag_test_ratio[index] = sq(_mag_innov[index]) / (sq(math::max(_params.mag_innov_gate, 1.0f)) * _mag_innov_var[index]);
+		_mag_test_ratio(index) = sq(_mag_innov(index)) / (sq(math::max(_params.mag_innov_gate, 1.0f)) * _mag_innov_var(index));
 
-		if (_mag_test_ratio[index] > 1.0f) {
-			healthy = false;
+		if (_mag_test_ratio(index) > 1.0f) {
+			all_innovation_checks_passed = false;
 			_innov_check_fail_status.value |= (1 << (index + 3));
 
 		} else {
@@ -166,7 +161,7 @@ void Ekf::fuseMag()
 	_yaw_test_ratio = 0.0f;
 
 	// if any axis fails, abort the mag fusion
-	if (!healthy) {
+	if (!all_innovation_checks_passed) {
 		return;
 	}
 
@@ -174,119 +169,109 @@ void Ekf::fuseMag()
 	// before they are used to constrain heading drift
 	const bool update_all_states = ((_imu_sample_delayed.time_us - _flt_mag_align_start_time) > (uint64_t)5e6);
 
+	// Observation jacobian and Kalman gain vectors
+	Vector24f H_MAG;
+	Vector24f Kfusion;
+
 	// update the states and covariance using sequential fusion of the magnetometer components
 	for (uint8_t index = 0; index <= 2; index++) {
 
 		// Calculate Kalman gains and observation jacobians
 		if (index == 0) {
 			// Calculate X axis observation jacobians
-			memset(H_MAG, 0, sizeof(H_MAG));
-			H_MAG[0] = SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2;
-			H_MAG[1] = SH_MAG[0];
-			H_MAG[2] = -SH_MAG[1];
-			H_MAG[3] = SH_MAG[2];
-			H_MAG[16] = SH_MAG[5] - SH_MAG[4] - SH_MAG[3] + SH_MAG[6];
-			H_MAG[17] = 2.0f*q0*q3 + 2.0f*q1*q2;
-			H_MAG[18] = 2.0f*q1*q3 - 2.0f*q0*q2;
-			H_MAG[19] = 1.0f;
+			H_MAG.setZero();
+			H_MAG(0) = SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2;
+			H_MAG(1) = SH_MAG[0];
+			H_MAG(2) = -SH_MAG[1];
+			H_MAG(3) = SH_MAG[2];
+			H_MAG(16) = SH_MAG[5] - SH_MAG[4] - SH_MAG[3] + SH_MAG[6];
+			H_MAG(17) = 2.0f*q0*q3 + 2.0f*q1*q2;
+			H_MAG(18) = 2.0f*q1*q3 - 2.0f*q0*q2;
+			H_MAG(19) = 1.0f;
 
 			// Calculate X axis Kalman gains
 			float SK_MX[5];
-			SK_MX[0] = 1.0f / _mag_innov_var[0];
+			SK_MX[0] = 1.0f / _mag_innov_var(0);
 			SK_MX[1] = SH_MAG[3] + SH_MAG[4] - SH_MAG[5] - SH_MAG[6];
 			SK_MX[2] = SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2;
 			SK_MX[3] = 2.0f*q0*q2 - 2.0f*q1*q3;
 			SK_MX[4] = 2.0f*q0*q3 + 2.0f*q1*q2;
 
 			if (update_all_states) {
-				Kfusion[0] = SK_MX[0]*(P(0,19) + P(0,1)*SH_MAG[0] - P(0,2)*SH_MAG[1] + P(0,3)*SH_MAG[2] + P(0,0)*SK_MX[2] - P(0,16)*SK_MX[1] + P(0,17)*SK_MX[4] - P(0,18)*SK_MX[3]);
-				Kfusion[1] = SK_MX[0]*(P(1,19) + P(1,1)*SH_MAG[0] - P(1,2)*SH_MAG[1] + P(1,3)*SH_MAG[2] + P(1,0)*SK_MX[2] - P(1,16)*SK_MX[1] + P(1,17)*SK_MX[4] - P(1,18)*SK_MX[3]);
-				Kfusion[2] = SK_MX[0]*(P(2,19) + P(2,1)*SH_MAG[0] - P(2,2)*SH_MAG[1] + P(2,3)*SH_MAG[2] + P(2,0)*SK_MX[2] - P(2,16)*SK_MX[1] + P(2,17)*SK_MX[4] - P(2,18)*SK_MX[3]);
-				Kfusion[3] = SK_MX[0]*(P(3,19) + P(3,1)*SH_MAG[0] - P(3,2)*SH_MAG[1] + P(3,3)*SH_MAG[2] + P(3,0)*SK_MX[2] - P(3,16)*SK_MX[1] + P(3,17)*SK_MX[4] - P(3,18)*SK_MX[3]);
-				Kfusion[4] = SK_MX[0]*(P(4,19) + P(4,1)*SH_MAG[0] - P(4,2)*SH_MAG[1] + P(4,3)*SH_MAG[2] + P(4,0)*SK_MX[2] - P(4,16)*SK_MX[1] + P(4,17)*SK_MX[4] - P(4,18)*SK_MX[3]);
-				Kfusion[5] = SK_MX[0]*(P(5,19) + P(5,1)*SH_MAG[0] - P(5,2)*SH_MAG[1] + P(5,3)*SH_MAG[2] + P(5,0)*SK_MX[2] - P(5,16)*SK_MX[1] + P(5,17)*SK_MX[4] - P(5,18)*SK_MX[3]);
-				Kfusion[6] = SK_MX[0]*(P(6,19) + P(6,1)*SH_MAG[0] - P(6,2)*SH_MAG[1] + P(6,3)*SH_MAG[2] + P(6,0)*SK_MX[2] - P(6,16)*SK_MX[1] + P(6,17)*SK_MX[4] - P(6,18)*SK_MX[3]);
-				Kfusion[7] = SK_MX[0]*(P(7,19) + P(7,1)*SH_MAG[0] - P(7,2)*SH_MAG[1] + P(7,3)*SH_MAG[2] + P(7,0)*SK_MX[2] - P(7,16)*SK_MX[1] + P(7,17)*SK_MX[4] - P(7,18)*SK_MX[3]);
-				Kfusion[8] = SK_MX[0]*(P(8,19) + P(8,1)*SH_MAG[0] - P(8,2)*SH_MAG[1] + P(8,3)*SH_MAG[2] + P(8,0)*SK_MX[2] - P(8,16)*SK_MX[1] + P(8,17)*SK_MX[4] - P(8,18)*SK_MX[3]);
-				Kfusion[9] = SK_MX[0]*(P(9,19) + P(9,1)*SH_MAG[0] - P(9,2)*SH_MAG[1] + P(9,3)*SH_MAG[2] + P(9,0)*SK_MX[2] - P(9,16)*SK_MX[1] + P(9,17)*SK_MX[4] - P(9,18)*SK_MX[3]);
-				Kfusion[10] = SK_MX[0]*(P(10,19) + P(10,1)*SH_MAG[0] - P(10,2)*SH_MAG[1] + P(10,3)*SH_MAG[2] + P(10,0)*SK_MX[2] - P(10,16)*SK_MX[1] + P(10,17)*SK_MX[4] - P(10,18)*SK_MX[3]);
-				Kfusion[11] = SK_MX[0]*(P(11,19) + P(11,1)*SH_MAG[0] - P(11,2)*SH_MAG[1] + P(11,3)*SH_MAG[2] + P(11,0)*SK_MX[2] - P(11,16)*SK_MX[1] + P(11,17)*SK_MX[4] - P(11,18)*SK_MX[3]);
-				Kfusion[12] = SK_MX[0]*(P(12,19) + P(12,1)*SH_MAG[0] - P(12,2)*SH_MAG[1] + P(12,3)*SH_MAG[2] + P(12,0)*SK_MX[2] - P(12,16)*SK_MX[1] + P(12,17)*SK_MX[4] - P(12,18)*SK_MX[3]);
-				Kfusion[13] = SK_MX[0]*(P(13,19) + P(13,1)*SH_MAG[0] - P(13,2)*SH_MAG[1] + P(13,3)*SH_MAG[2] + P(13,0)*SK_MX[2] - P(13,16)*SK_MX[1] + P(13,17)*SK_MX[4] - P(13,18)*SK_MX[3]);
-				Kfusion[14] = SK_MX[0]*(P(14,19) + P(14,1)*SH_MAG[0] - P(14,2)*SH_MAG[1] + P(14,3)*SH_MAG[2] + P(14,0)*SK_MX[2] - P(14,16)*SK_MX[1] + P(14,17)*SK_MX[4] - P(14,18)*SK_MX[3]);
-				Kfusion[15] = SK_MX[0]*(P(15,19) + P(15,1)*SH_MAG[0] - P(15,2)*SH_MAG[1] + P(15,3)*SH_MAG[2] + P(15,0)*SK_MX[2] - P(15,16)*SK_MX[1] + P(15,17)*SK_MX[4] - P(15,18)*SK_MX[3]);
-				Kfusion[22] = SK_MX[0]*(P(22,19) + P(22,1)*SH_MAG[0] - P(22,2)*SH_MAG[1] + P(22,3)*SH_MAG[2] + P(22,0)*SK_MX[2] - P(22,16)*SK_MX[1] + P(22,17)*SK_MX[4] - P(22,18)*SK_MX[3]);
-				Kfusion[23] = SK_MX[0]*(P(23,19) + P(23,1)*SH_MAG[0] - P(23,2)*SH_MAG[1] + P(23,3)*SH_MAG[2] + P(23,0)*SK_MX[2] - P(23,16)*SK_MX[1] + P(23,17)*SK_MX[4] - P(23,18)*SK_MX[3]);
-			} else {
-				for (uint8_t i = 0; i < 16; i++) {
-					Kfusion[i] = 0.0f;
-				}
-
-				Kfusion[22] = 0.0f;
-				Kfusion[23] = 0.0f;
+				Kfusion(0) = SK_MX[0]*(P(0,19) + P(0,1)*SH_MAG[0] - P(0,2)*SH_MAG[1] + P(0,3)*SH_MAG[2] + P(0,0)*SK_MX[2] - P(0,16)*SK_MX[1] + P(0,17)*SK_MX[4] - P(0,18)*SK_MX[3]);
+				Kfusion(1) = SK_MX[0]*(P(1,19) + P(1,1)*SH_MAG[0] - P(1,2)*SH_MAG[1] + P(1,3)*SH_MAG[2] + P(1,0)*SK_MX[2] - P(1,16)*SK_MX[1] + P(1,17)*SK_MX[4] - P(1,18)*SK_MX[3]);
+				Kfusion(2) = SK_MX[0]*(P(2,19) + P(2,1)*SH_MAG[0] - P(2,2)*SH_MAG[1] + P(2,3)*SH_MAG[2] + P(2,0)*SK_MX[2] - P(2,16)*SK_MX[1] + P(2,17)*SK_MX[4] - P(2,18)*SK_MX[3]);
+				Kfusion(3) = SK_MX[0]*(P(3,19) + P(3,1)*SH_MAG[0] - P(3,2)*SH_MAG[1] + P(3,3)*SH_MAG[2] + P(3,0)*SK_MX[2] - P(3,16)*SK_MX[1] + P(3,17)*SK_MX[4] - P(3,18)*SK_MX[3]);
+				Kfusion(4) = SK_MX[0]*(P(4,19) + P(4,1)*SH_MAG[0] - P(4,2)*SH_MAG[1] + P(4,3)*SH_MAG[2] + P(4,0)*SK_MX[2] - P(4,16)*SK_MX[1] + P(4,17)*SK_MX[4] - P(4,18)*SK_MX[3]);
+				Kfusion(5) = SK_MX[0]*(P(5,19) + P(5,1)*SH_MAG[0] - P(5,2)*SH_MAG[1] + P(5,3)*SH_MAG[2] + P(5,0)*SK_MX[2] - P(5,16)*SK_MX[1] + P(5,17)*SK_MX[4] - P(5,18)*SK_MX[3]);
+				Kfusion(6) = SK_MX[0]*(P(6,19) + P(6,1)*SH_MAG[0] - P(6,2)*SH_MAG[1] + P(6,3)*SH_MAG[2] + P(6,0)*SK_MX[2] - P(6,16)*SK_MX[1] + P(6,17)*SK_MX[4] - P(6,18)*SK_MX[3]);
+				Kfusion(7) = SK_MX[0]*(P(7,19) + P(7,1)*SH_MAG[0] - P(7,2)*SH_MAG[1] + P(7,3)*SH_MAG[2] + P(7,0)*SK_MX[2] - P(7,16)*SK_MX[1] + P(7,17)*SK_MX[4] - P(7,18)*SK_MX[3]);
+				Kfusion(8) = SK_MX[0]*(P(8,19) + P(8,1)*SH_MAG[0] - P(8,2)*SH_MAG[1] + P(8,3)*SH_MAG[2] + P(8,0)*SK_MX[2] - P(8,16)*SK_MX[1] + P(8,17)*SK_MX[4] - P(8,18)*SK_MX[3]);
+				Kfusion(9) = SK_MX[0]*(P(9,19) + P(9,1)*SH_MAG[0] - P(9,2)*SH_MAG[1] + P(9,3)*SH_MAG[2] + P(9,0)*SK_MX[2] - P(9,16)*SK_MX[1] + P(9,17)*SK_MX[4] - P(9,18)*SK_MX[3]);
+				Kfusion(10) = SK_MX[0]*(P(10,19) + P(10,1)*SH_MAG[0] - P(10,2)*SH_MAG[1] + P(10,3)*SH_MAG[2] + P(10,0)*SK_MX[2] - P(10,16)*SK_MX[1] + P(10,17)*SK_MX[4] - P(10,18)*SK_MX[3]);
+				Kfusion(11) = SK_MX[0]*(P(11,19) + P(11,1)*SH_MAG[0] - P(11,2)*SH_MAG[1] + P(11,3)*SH_MAG[2] + P(11,0)*SK_MX[2] - P(11,16)*SK_MX[1] + P(11,17)*SK_MX[4] - P(11,18)*SK_MX[3]);
+				Kfusion(12) = SK_MX[0]*(P(12,19) + P(12,1)*SH_MAG[0] - P(12,2)*SH_MAG[1] + P(12,3)*SH_MAG[2] + P(12,0)*SK_MX[2] - P(12,16)*SK_MX[1] + P(12,17)*SK_MX[4] - P(12,18)*SK_MX[3]);
+				Kfusion(13) = SK_MX[0]*(P(13,19) + P(13,1)*SH_MAG[0] - P(13,2)*SH_MAG[1] + P(13,3)*SH_MAG[2] + P(13,0)*SK_MX[2] - P(13,16)*SK_MX[1] + P(13,17)*SK_MX[4] - P(13,18)*SK_MX[3]);
+				Kfusion(14) = SK_MX[0]*(P(14,19) + P(14,1)*SH_MAG[0] - P(14,2)*SH_MAG[1] + P(14,3)*SH_MAG[2] + P(14,0)*SK_MX[2] - P(14,16)*SK_MX[1] + P(14,17)*SK_MX[4] - P(14,18)*SK_MX[3]);
+				Kfusion(15) = SK_MX[0]*(P(15,19) + P(15,1)*SH_MAG[0] - P(15,2)*SH_MAG[1] + P(15,3)*SH_MAG[2] + P(15,0)*SK_MX[2] - P(15,16)*SK_MX[1] + P(15,17)*SK_MX[4] - P(15,18)*SK_MX[3]);
+				Kfusion(22) = SK_MX[0]*(P(22,19) + P(22,1)*SH_MAG[0] - P(22,2)*SH_MAG[1] + P(22,3)*SH_MAG[2] + P(22,0)*SK_MX[2] - P(22,16)*SK_MX[1] + P(22,17)*SK_MX[4] - P(22,18)*SK_MX[3]);
+				Kfusion(23) = SK_MX[0]*(P(23,19) + P(23,1)*SH_MAG[0] - P(23,2)*SH_MAG[1] + P(23,3)*SH_MAG[2] + P(23,0)*SK_MX[2] - P(23,16)*SK_MX[1] + P(23,17)*SK_MX[4] - P(23,18)*SK_MX[3]);
 			}
 
-			Kfusion[16] = SK_MX[0]*(P(16,19) + P(16,1)*SH_MAG[0] - P(16,2)*SH_MAG[1] + P(16,3)*SH_MAG[2] + P(16,0)*SK_MX[2] - P(16,16)*SK_MX[1] + P(16,17)*SK_MX[4] - P(16,18)*SK_MX[3]);
-			Kfusion[17] = SK_MX[0]*(P(17,19) + P(17,1)*SH_MAG[0] - P(17,2)*SH_MAG[1] + P(17,3)*SH_MAG[2] + P(17,0)*SK_MX[2] - P(17,16)*SK_MX[1] + P(17,17)*SK_MX[4] - P(17,18)*SK_MX[3]);
-			Kfusion[18] = SK_MX[0]*(P(18,19) + P(18,1)*SH_MAG[0] - P(18,2)*SH_MAG[1] + P(18,3)*SH_MAG[2] + P(18,0)*SK_MX[2] - P(18,16)*SK_MX[1] + P(18,17)*SK_MX[4] - P(18,18)*SK_MX[3]);
-			Kfusion[19] = SK_MX[0]*(P(19,19) + P(19,1)*SH_MAG[0] - P(19,2)*SH_MAG[1] + P(19,3)*SH_MAG[2] + P(19,0)*SK_MX[2] - P(19,16)*SK_MX[1] + P(19,17)*SK_MX[4] - P(19,18)*SK_MX[3]);
-			Kfusion[20] = SK_MX[0]*(P(20,19) + P(20,1)*SH_MAG[0] - P(20,2)*SH_MAG[1] + P(20,3)*SH_MAG[2] + P(20,0)*SK_MX[2] - P(20,16)*SK_MX[1] + P(20,17)*SK_MX[4] - P(20,18)*SK_MX[3]);
-			Kfusion[21] = SK_MX[0]*(P(21,19) + P(21,1)*SH_MAG[0] - P(21,2)*SH_MAG[1] + P(21,3)*SH_MAG[2] + P(21,0)*SK_MX[2] - P(21,16)*SK_MX[1] + P(21,17)*SK_MX[4] - P(21,18)*SK_MX[3]);
+			Kfusion(16) = SK_MX[0]*(P(16,19) + P(16,1)*SH_MAG[0] - P(16,2)*SH_MAG[1] + P(16,3)*SH_MAG[2] + P(16,0)*SK_MX[2] - P(16,16)*SK_MX[1] + P(16,17)*SK_MX[4] - P(16,18)*SK_MX[3]);
+			Kfusion(17) = SK_MX[0]*(P(17,19) + P(17,1)*SH_MAG[0] - P(17,2)*SH_MAG[1] + P(17,3)*SH_MAG[2] + P(17,0)*SK_MX[2] - P(17,16)*SK_MX[1] + P(17,17)*SK_MX[4] - P(17,18)*SK_MX[3]);
+			Kfusion(18) = SK_MX[0]*(P(18,19) + P(18,1)*SH_MAG[0] - P(18,2)*SH_MAG[1] + P(18,3)*SH_MAG[2] + P(18,0)*SK_MX[2] - P(18,16)*SK_MX[1] + P(18,17)*SK_MX[4] - P(18,18)*SK_MX[3]);
+			Kfusion(19) = SK_MX[0]*(P(19,19) + P(19,1)*SH_MAG[0] - P(19,2)*SH_MAG[1] + P(19,3)*SH_MAG[2] + P(19,0)*SK_MX[2] - P(19,16)*SK_MX[1] + P(19,17)*SK_MX[4] - P(19,18)*SK_MX[3]);
+			Kfusion(20) = SK_MX[0]*(P(20,19) + P(20,1)*SH_MAG[0] - P(20,2)*SH_MAG[1] + P(20,3)*SH_MAG[2] + P(20,0)*SK_MX[2] - P(20,16)*SK_MX[1] + P(20,17)*SK_MX[4] - P(20,18)*SK_MX[3]);
+			Kfusion(21) = SK_MX[0]*(P(21,19) + P(21,1)*SH_MAG[0] - P(21,2)*SH_MAG[1] + P(21,3)*SH_MAG[2] + P(21,0)*SK_MX[2] - P(21,16)*SK_MX[1] + P(21,17)*SK_MX[4] - P(21,18)*SK_MX[3]);
 
 		} else if (index == 1) {
 			// Calculate Y axis observation jacobians
-			memset(H_MAG, 0, sizeof(H_MAG));
-			H_MAG[0] = SH_MAG[2];
-			H_MAG[1] = SH_MAG[1];
-			H_MAG[2] = SH_MAG[0];
-			H_MAG[3] = 2.0f*magD*q2 - SH_MAG[8] - SH_MAG[7];
-			H_MAG[16] = 2.0f*q1*q2 - 2.0f*q0*q3;
-			H_MAG[17] = SH_MAG[4] - SH_MAG[3] - SH_MAG[5] + SH_MAG[6];
-			H_MAG[18] = 2.0f*q0*q1 + 2.0f*q2*q3;
-			H_MAG[20] = 1.0f;
+			H_MAG.setZero();
+			H_MAG(0) = SH_MAG[2];
+			H_MAG(1) = SH_MAG[1];
+			H_MAG(2) = SH_MAG[0];
+			H_MAG(3) = 2.0f*magD*q2 - SH_MAG[8] - SH_MAG[7];
+			H_MAG(16) = 2.0f*q1*q2 - 2.0f*q0*q3;
+			H_MAG(17) = SH_MAG[4] - SH_MAG[3] - SH_MAG[5] + SH_MAG[6];
+			H_MAG(18) = 2.0f*q0*q1 + 2.0f*q2*q3;
+			H_MAG(20) = 1.0f;
 
 			// Calculate Y axis Kalman gains
 			float SK_MY[5];
-			SK_MY[0] = 1.0f / _mag_innov_var[1];
+			SK_MY[0] = 1.0f / _mag_innov_var(1);
 			SK_MY[1] = SH_MAG[3] - SH_MAG[4] + SH_MAG[5] - SH_MAG[6];
 			SK_MY[2] = SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2;
 			SK_MY[3] = 2.0f*q0*q3 - 2.0f*q1*q2;
 			SK_MY[4] = 2.0f*q0*q1 + 2.0f*q2*q3;
 
 			if (update_all_states) {
-				Kfusion[0] = SK_MY[0]*(P(0,20) + P(0,0)*SH_MAG[2] + P(0,1)*SH_MAG[1] + P(0,2)*SH_MAG[0] - P(0,3)*SK_MY[2] - P(0,17)*SK_MY[1] - P(0,16)*SK_MY[3] + P(0,18)*SK_MY[4]);
-				Kfusion[1] = SK_MY[0]*(P(1,20) + P(1,0)*SH_MAG[2] + P(1,1)*SH_MAG[1] + P(1,2)*SH_MAG[0] - P(1,3)*SK_MY[2] - P(1,17)*SK_MY[1] - P(1,16)*SK_MY[3] + P(1,18)*SK_MY[4]);
-				Kfusion[2] = SK_MY[0]*(P(2,20) + P(2,0)*SH_MAG[2] + P(2,1)*SH_MAG[1] + P(2,2)*SH_MAG[0] - P(2,3)*SK_MY[2] - P(2,17)*SK_MY[1] - P(2,16)*SK_MY[3] + P(2,18)*SK_MY[4]);
-				Kfusion[3] = SK_MY[0]*(P(3,20) + P(3,0)*SH_MAG[2] + P(3,1)*SH_MAG[1] + P(3,2)*SH_MAG[0] - P(3,3)*SK_MY[2] - P(3,17)*SK_MY[1] - P(3,16)*SK_MY[3] + P(3,18)*SK_MY[4]);
-				Kfusion[4] = SK_MY[0]*(P(4,20) + P(4,0)*SH_MAG[2] + P(4,1)*SH_MAG[1] + P(4,2)*SH_MAG[0] - P(4,3)*SK_MY[2] - P(4,17)*SK_MY[1] - P(4,16)*SK_MY[3] + P(4,18)*SK_MY[4]);
-				Kfusion[5] = SK_MY[0]*(P(5,20) + P(5,0)*SH_MAG[2] + P(5,1)*SH_MAG[1] + P(5,2)*SH_MAG[0] - P(5,3)*SK_MY[2] - P(5,17)*SK_MY[1] - P(5,16)*SK_MY[3] + P(5,18)*SK_MY[4]);
-				Kfusion[6] = SK_MY[0]*(P(6,20) + P(6,0)*SH_MAG[2] + P(6,1)*SH_MAG[1] + P(6,2)*SH_MAG[0] - P(6,3)*SK_MY[2] - P(6,17)*SK_MY[1] - P(6,16)*SK_MY[3] + P(6,18)*SK_MY[4]);
-				Kfusion[7] = SK_MY[0]*(P(7,20) + P(7,0)*SH_MAG[2] + P(7,1)*SH_MAG[1] + P(7,2)*SH_MAG[0] - P(7,3)*SK_MY[2] - P(7,17)*SK_MY[1] - P(7,16)*SK_MY[3] + P(7,18)*SK_MY[4]);
-				Kfusion[8] = SK_MY[0]*(P(8,20) + P(8,0)*SH_MAG[2] + P(8,1)*SH_MAG[1] + P(8,2)*SH_MAG[0] - P(8,3)*SK_MY[2] - P(8,17)*SK_MY[1] - P(8,16)*SK_MY[3] + P(8,18)*SK_MY[4]);
-				Kfusion[9] = SK_MY[0]*(P(9,20) + P(9,0)*SH_MAG[2] + P(9,1)*SH_MAG[1] + P(9,2)*SH_MAG[0] - P(9,3)*SK_MY[2] - P(9,17)*SK_MY[1] - P(9,16)*SK_MY[3] + P(9,18)*SK_MY[4]);
-				Kfusion[10] = SK_MY[0]*(P(10,20) + P(10,0)*SH_MAG[2] + P(10,1)*SH_MAG[1] + P(10,2)*SH_MAG[0] - P(10,3)*SK_MY[2] - P(10,17)*SK_MY[1] - P(10,16)*SK_MY[3] + P(10,18)*SK_MY[4]);
-				Kfusion[11] = SK_MY[0]*(P(11,20) + P(11,0)*SH_MAG[2] + P(11,1)*SH_MAG[1] + P(11,2)*SH_MAG[0] - P(11,3)*SK_MY[2] - P(11,17)*SK_MY[1] - P(11,16)*SK_MY[3] + P(11,18)*SK_MY[4]);
-				Kfusion[12] = SK_MY[0]*(P(12,20) + P(12,0)*SH_MAG[2] + P(12,1)*SH_MAG[1] + P(12,2)*SH_MAG[0] - P(12,3)*SK_MY[2] - P(12,17)*SK_MY[1] - P(12,16)*SK_MY[3] + P(12,18)*SK_MY[4]);
-				Kfusion[13] = SK_MY[0]*(P(13,20) + P(13,0)*SH_MAG[2] + P(13,1)*SH_MAG[1] + P(13,2)*SH_MAG[0] - P(13,3)*SK_MY[2] - P(13,17)*SK_MY[1] - P(13,16)*SK_MY[3] + P(13,18)*SK_MY[4]);
-				Kfusion[14] = SK_MY[0]*(P(14,20) + P(14,0)*SH_MAG[2] + P(14,1)*SH_MAG[1] + P(14,2)*SH_MAG[0] - P(14,3)*SK_MY[2] - P(14,17)*SK_MY[1] - P(14,16)*SK_MY[3] + P(14,18)*SK_MY[4]);
-				Kfusion[15] = SK_MY[0]*(P(15,20) + P(15,0)*SH_MAG[2] + P(15,1)*SH_MAG[1] + P(15,2)*SH_MAG[0] - P(15,3)*SK_MY[2] - P(15,17)*SK_MY[1] - P(15,16)*SK_MY[3] + P(15,18)*SK_MY[4]);
-				Kfusion[22] = SK_MY[0]*(P(22,20) + P(22,0)*SH_MAG[2] + P(22,1)*SH_MAG[1] + P(22,2)*SH_MAG[0] - P(22,3)*SK_MY[2] - P(22,17)*SK_MY[1] - P(22,16)*SK_MY[3] + P(22,18)*SK_MY[4]);
-				Kfusion[23] = SK_MY[0]*(P(23,20) + P(23,0)*SH_MAG[2] + P(23,1)*SH_MAG[1] + P(23,2)*SH_MAG[0] - P(23,3)*SK_MY[2] - P(23,17)*SK_MY[1] - P(23,16)*SK_MY[3] + P(23,18)*SK_MY[4]);
-			} else {
-				for (uint8_t i = 0; i < 16; i++) {
-					Kfusion[i] = 0.0f;
-				}
-
-				Kfusion[22] = 0.0f;
-				Kfusion[23] = 0.0f;
+				Kfusion(0) = SK_MY[0]*(P(0,20) + P(0,0)*SH_MAG[2] + P(0,1)*SH_MAG[1] + P(0,2)*SH_MAG[0] - P(0,3)*SK_MY[2] - P(0,17)*SK_MY[1] - P(0,16)*SK_MY[3] + P(0,18)*SK_MY[4]);
+				Kfusion(1) = SK_MY[0]*(P(1,20) + P(1,0)*SH_MAG[2] + P(1,1)*SH_MAG[1] + P(1,2)*SH_MAG[0] - P(1,3)*SK_MY[2] - P(1,17)*SK_MY[1] - P(1,16)*SK_MY[3] + P(1,18)*SK_MY[4]);
+				Kfusion(2) = SK_MY[0]*(P(2,20) + P(2,0)*SH_MAG[2] + P(2,1)*SH_MAG[1] + P(2,2)*SH_MAG[0] - P(2,3)*SK_MY[2] - P(2,17)*SK_MY[1] - P(2,16)*SK_MY[3] + P(2,18)*SK_MY[4]);
+				Kfusion(3) = SK_MY[0]*(P(3,20) + P(3,0)*SH_MAG[2] + P(3,1)*SH_MAG[1] + P(3,2)*SH_MAG[0] - P(3,3)*SK_MY[2] - P(3,17)*SK_MY[1] - P(3,16)*SK_MY[3] + P(3,18)*SK_MY[4]);
+				Kfusion(4) = SK_MY[0]*(P(4,20) + P(4,0)*SH_MAG[2] + P(4,1)*SH_MAG[1] + P(4,2)*SH_MAG[0] - P(4,3)*SK_MY[2] - P(4,17)*SK_MY[1] - P(4,16)*SK_MY[3] + P(4,18)*SK_MY[4]);
+				Kfusion(5) = SK_MY[0]*(P(5,20) + P(5,0)*SH_MAG[2] + P(5,1)*SH_MAG[1] + P(5,2)*SH_MAG[0] - P(5,3)*SK_MY[2] - P(5,17)*SK_MY[1] - P(5,16)*SK_MY[3] + P(5,18)*SK_MY[4]);
+				Kfusion(6) = SK_MY[0]*(P(6,20) + P(6,0)*SH_MAG[2] + P(6,1)*SH_MAG[1] + P(6,2)*SH_MAG[0] - P(6,3)*SK_MY[2] - P(6,17)*SK_MY[1] - P(6,16)*SK_MY[3] + P(6,18)*SK_MY[4]);
+				Kfusion(7) = SK_MY[0]*(P(7,20) + P(7,0)*SH_MAG[2] + P(7,1)*SH_MAG[1] + P(7,2)*SH_MAG[0] - P(7,3)*SK_MY[2] - P(7,17)*SK_MY[1] - P(7,16)*SK_MY[3] + P(7,18)*SK_MY[4]);
+				Kfusion(8) = SK_MY[0]*(P(8,20) + P(8,0)*SH_MAG[2] + P(8,1)*SH_MAG[1] + P(8,2)*SH_MAG[0] - P(8,3)*SK_MY[2] - P(8,17)*SK_MY[1] - P(8,16)*SK_MY[3] + P(8,18)*SK_MY[4]);
+				Kfusion(9) = SK_MY[0]*(P(9,20) + P(9,0)*SH_MAG[2] + P(9,1)*SH_MAG[1] + P(9,2)*SH_MAG[0] - P(9,3)*SK_MY[2] - P(9,17)*SK_MY[1] - P(9,16)*SK_MY[3] + P(9,18)*SK_MY[4]);
+				Kfusion(10) = SK_MY[0]*(P(10,20) + P(10,0)*SH_MAG[2] + P(10,1)*SH_MAG[1] + P(10,2)*SH_MAG[0] - P(10,3)*SK_MY[2] - P(10,17)*SK_MY[1] - P(10,16)*SK_MY[3] + P(10,18)*SK_MY[4]);
+				Kfusion(11) = SK_MY[0]*(P(11,20) + P(11,0)*SH_MAG[2] + P(11,1)*SH_MAG[1] + P(11,2)*SH_MAG[0] - P(11,3)*SK_MY[2] - P(11,17)*SK_MY[1] - P(11,16)*SK_MY[3] + P(11,18)*SK_MY[4]);
+				Kfusion(12) = SK_MY[0]*(P(12,20) + P(12,0)*SH_MAG[2] + P(12,1)*SH_MAG[1] + P(12,2)*SH_MAG[0] - P(12,3)*SK_MY[2] - P(12,17)*SK_MY[1] - P(12,16)*SK_MY[3] + P(12,18)*SK_MY[4]);
+				Kfusion(13) = SK_MY[0]*(P(13,20) + P(13,0)*SH_MAG[2] + P(13,1)*SH_MAG[1] + P(13,2)*SH_MAG[0] - P(13,3)*SK_MY[2] - P(13,17)*SK_MY[1] - P(13,16)*SK_MY[3] + P(13,18)*SK_MY[4]);
+				Kfusion(14) = SK_MY[0]*(P(14,20) + P(14,0)*SH_MAG[2] + P(14,1)*SH_MAG[1] + P(14,2)*SH_MAG[0] - P(14,3)*SK_MY[2] - P(14,17)*SK_MY[1] - P(14,16)*SK_MY[3] + P(14,18)*SK_MY[4]);
+				Kfusion(15) = SK_MY[0]*(P(15,20) + P(15,0)*SH_MAG[2] + P(15,1)*SH_MAG[1] + P(15,2)*SH_MAG[0] - P(15,3)*SK_MY[2] - P(15,17)*SK_MY[1] - P(15,16)*SK_MY[3] + P(15,18)*SK_MY[4]);
+				Kfusion(22) = SK_MY[0]*(P(22,20) + P(22,0)*SH_MAG[2] + P(22,1)*SH_MAG[1] + P(22,2)*SH_MAG[0] - P(22,3)*SK_MY[2] - P(22,17)*SK_MY[1] - P(22,16)*SK_MY[3] + P(22,18)*SK_MY[4]);
+				Kfusion(23) = SK_MY[0]*(P(23,20) + P(23,0)*SH_MAG[2] + P(23,1)*SH_MAG[1] + P(23,2)*SH_MAG[0] - P(23,3)*SK_MY[2] - P(23,17)*SK_MY[1] - P(23,16)*SK_MY[3] + P(23,18)*SK_MY[4]);
 			}
 
-			Kfusion[16] = SK_MY[0]*(P(16,20) + P(16,0)*SH_MAG[2] + P(16,1)*SH_MAG[1] + P(16,2)*SH_MAG[0] - P(16,3)*SK_MY[2] - P(16,17)*SK_MY[1] - P(16,16)*SK_MY[3] + P(16,18)*SK_MY[4]);
-			Kfusion[17] = SK_MY[0]*(P(17,20) + P(17,0)*SH_MAG[2] + P(17,1)*SH_MAG[1] + P(17,2)*SH_MAG[0] - P(17,3)*SK_MY[2] - P(17,17)*SK_MY[1] - P(17,16)*SK_MY[3] + P(17,18)*SK_MY[4]);
-			Kfusion[18] = SK_MY[0]*(P(18,20) + P(18,0)*SH_MAG[2] + P(18,1)*SH_MAG[1] + P(18,2)*SH_MAG[0] - P(18,3)*SK_MY[2] - P(18,17)*SK_MY[1] - P(18,16)*SK_MY[3] + P(18,18)*SK_MY[4]);
-			Kfusion[19] = SK_MY[0]*(P(19,20) + P(19,0)*SH_MAG[2] + P(19,1)*SH_MAG[1] + P(19,2)*SH_MAG[0] - P(19,3)*SK_MY[2] - P(19,17)*SK_MY[1] - P(19,16)*SK_MY[3] + P(19,18)*SK_MY[4]);
-			Kfusion[20] = SK_MY[0]*(P(20,20) + P(20,0)*SH_MAG[2] + P(20,1)*SH_MAG[1] + P(20,2)*SH_MAG[0] - P(20,3)*SK_MY[2] - P(20,17)*SK_MY[1] - P(20,16)*SK_MY[3] + P(20,18)*SK_MY[4]);
-			Kfusion[21] = SK_MY[0]*(P(21,20) + P(21,0)*SH_MAG[2] + P(21,1)*SH_MAG[1] + P(21,2)*SH_MAG[0] - P(21,3)*SK_MY[2] - P(21,17)*SK_MY[1] - P(21,16)*SK_MY[3] + P(21,18)*SK_MY[4]);
+			Kfusion(16) = SK_MY[0]*(P(16,20) + P(16,0)*SH_MAG[2] + P(16,1)*SH_MAG[1] + P(16,2)*SH_MAG[0] - P(16,3)*SK_MY[2] - P(16,17)*SK_MY[1] - P(16,16)*SK_MY[3] + P(16,18)*SK_MY[4]);
+			Kfusion(17) = SK_MY[0]*(P(17,20) + P(17,0)*SH_MAG[2] + P(17,1)*SH_MAG[1] + P(17,2)*SH_MAG[0] - P(17,3)*SK_MY[2] - P(17,17)*SK_MY[1] - P(17,16)*SK_MY[3] + P(17,18)*SK_MY[4]);
+			Kfusion(18) = SK_MY[0]*(P(18,20) + P(18,0)*SH_MAG[2] + P(18,1)*SH_MAG[1] + P(18,2)*SH_MAG[0] - P(18,3)*SK_MY[2] - P(18,17)*SK_MY[1] - P(18,16)*SK_MY[3] + P(18,18)*SK_MY[4]);
+			Kfusion(19) = SK_MY[0]*(P(19,20) + P(19,0)*SH_MAG[2] + P(19,1)*SH_MAG[1] + P(19,2)*SH_MAG[0] - P(19,3)*SK_MY[2] - P(19,17)*SK_MY[1] - P(19,16)*SK_MY[3] + P(19,18)*SK_MY[4]);
+			Kfusion(20) = SK_MY[0]*(P(20,20) + P(20,0)*SH_MAG[2] + P(20,1)*SH_MAG[1] + P(20,2)*SH_MAG[0] - P(20,3)*SK_MY[2] - P(20,17)*SK_MY[1] - P(20,16)*SK_MY[3] + P(20,18)*SK_MY[4]);
+			Kfusion(21) = SK_MY[0]*(P(21,20) + P(21,0)*SH_MAG[2] + P(21,1)*SH_MAG[1] + P(21,2)*SH_MAG[0] - P(21,3)*SK_MY[2] - P(21,17)*SK_MY[1] - P(21,16)*SK_MY[3] + P(21,18)*SK_MY[4]);
 
 		} else if (index == 2) {
 
@@ -296,81 +281,72 @@ void Ekf::fuseMag()
 			}
 
 			// calculate Z axis observation jacobians
-			memset(H_MAG, 0, sizeof(H_MAG));
-			H_MAG[0] = SH_MAG[1];
-			H_MAG[1] = -SH_MAG[2];
-			H_MAG[2] = SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2;
-			H_MAG[3] = SH_MAG[0];
-			H_MAG[16] = 2.0f*q0*q2 + 2.0f*q1*q3;
-			H_MAG[17] = 2.0f*q2*q3 - 2.0f*q0*q1;
-			H_MAG[18] = SH_MAG[3] - SH_MAG[4] - SH_MAG[5] + SH_MAG[6];
-			H_MAG[21] = 1.0f;
+			H_MAG.setZero();
+			H_MAG(0) = SH_MAG[1];
+			H_MAG(1) = -SH_MAG[2];
+			H_MAG(2) = SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2;
+			H_MAG(3) = SH_MAG[0];
+			H_MAG(16) = 2.0f*q0*q2 + 2.0f*q1*q3;
+			H_MAG(17) = 2.0f*q2*q3 - 2.0f*q0*q1;
+			H_MAG(18) = SH_MAG[3] - SH_MAG[4] - SH_MAG[5] + SH_MAG[6];
+			H_MAG(21) = 1.0f;
 
 			// Calculate Z axis Kalman gains
 			float SK_MZ[5];
-			SK_MZ[0] = 1.0f / _mag_innov_var[2];
+			SK_MZ[0] = 1.0f / _mag_innov_var(2);
 			SK_MZ[1] = SH_MAG[3] - SH_MAG[4] - SH_MAG[5] + SH_MAG[6];
 			SK_MZ[2] = SH_MAG[7] + SH_MAG[8] - 2.0f*magD*q2;
 			SK_MZ[3] = 2.0f*q0*q1 - 2.0f*q2*q3;
 			SK_MZ[4] = 2.0f*q0*q2 + 2.0f*q1*q3;
 
 			if (update_all_states) {
-				Kfusion[0] = SK_MZ[0]*(P(0,21) + P(0,0)*SH_MAG[1] - P(0,1)*SH_MAG[2] + P(0,3)*SH_MAG[0] + P(0,2)*SK_MZ[2] + P(0,18)*SK_MZ[1] + P(0,16)*SK_MZ[4] - P(0,17)*SK_MZ[3]);
-				Kfusion[1] = SK_MZ[0]*(P(1,21) + P(1,0)*SH_MAG[1] - P(1,1)*SH_MAG[2] + P(1,3)*SH_MAG[0] + P(1,2)*SK_MZ[2] + P(1,18)*SK_MZ[1] + P(1,16)*SK_MZ[4] - P(1,17)*SK_MZ[3]);
-				Kfusion[2] = SK_MZ[0]*(P(2,21) + P(2,0)*SH_MAG[1] - P(2,1)*SH_MAG[2] + P(2,3)*SH_MAG[0] + P(2,2)*SK_MZ[2] + P(2,18)*SK_MZ[1] + P(2,16)*SK_MZ[4] - P(2,17)*SK_MZ[3]);
-				Kfusion[3] = SK_MZ[0]*(P(3,21) + P(3,0)*SH_MAG[1] - P(3,1)*SH_MAG[2] + P(3,3)*SH_MAG[0] + P(3,2)*SK_MZ[2] + P(3,18)*SK_MZ[1] + P(3,16)*SK_MZ[4] - P(3,17)*SK_MZ[3]);
-				Kfusion[4] = SK_MZ[0]*(P(4,21) + P(4,0)*SH_MAG[1] - P(4,1)*SH_MAG[2] + P(4,3)*SH_MAG[0] + P(4,2)*SK_MZ[2] + P(4,18)*SK_MZ[1] + P(4,16)*SK_MZ[4] - P(4,17)*SK_MZ[3]);
-				Kfusion[5] = SK_MZ[0]*(P(5,21) + P(5,0)*SH_MAG[1] - P(5,1)*SH_MAG[2] + P(5,3)*SH_MAG[0] + P(5,2)*SK_MZ[2] + P(5,18)*SK_MZ[1] + P(5,16)*SK_MZ[4] - P(5,17)*SK_MZ[3]);
-				Kfusion[6] = SK_MZ[0]*(P(6,21) + P(6,0)*SH_MAG[1] - P(6,1)*SH_MAG[2] + P(6,3)*SH_MAG[0] + P(6,2)*SK_MZ[2] + P(6,18)*SK_MZ[1] + P(6,16)*SK_MZ[4] - P(6,17)*SK_MZ[3]);
-				Kfusion[7] = SK_MZ[0]*(P(7,21) + P(7,0)*SH_MAG[1] - P(7,1)*SH_MAG[2] + P(7,3)*SH_MAG[0] + P(7,2)*SK_MZ[2] + P(7,18)*SK_MZ[1] + P(7,16)*SK_MZ[4] - P(7,17)*SK_MZ[3]);
-				Kfusion[8] = SK_MZ[0]*(P(8,21) + P(8,0)*SH_MAG[1] - P(8,1)*SH_MAG[2] + P(8,3)*SH_MAG[0] + P(8,2)*SK_MZ[2] + P(8,18)*SK_MZ[1] + P(8,16)*SK_MZ[4] - P(8,17)*SK_MZ[3]);
-				Kfusion[9] = SK_MZ[0]*(P(9,21) + P(9,0)*SH_MAG[1] - P(9,1)*SH_MAG[2] + P(9,3)*SH_MAG[0] + P(9,2)*SK_MZ[2] + P(9,18)*SK_MZ[1] + P(9,16)*SK_MZ[4] - P(9,17)*SK_MZ[3]);
-				Kfusion[10] = SK_MZ[0]*(P(10,21) + P(10,0)*SH_MAG[1] - P(10,1)*SH_MAG[2] + P(10,3)*SH_MAG[0] + P(10,2)*SK_MZ[2] + P(10,18)*SK_MZ[1] + P(10,16)*SK_MZ[4] - P(10,17)*SK_MZ[3]);
-				Kfusion[11] = SK_MZ[0]*(P(11,21) + P(11,0)*SH_MAG[1] - P(11,1)*SH_MAG[2] + P(11,3)*SH_MAG[0] + P(11,2)*SK_MZ[2] + P(11,18)*SK_MZ[1] + P(11,16)*SK_MZ[4] - P(11,17)*SK_MZ[3]);
-				Kfusion[12] = SK_MZ[0]*(P(12,21) + P(12,0)*SH_MAG[1] - P(12,1)*SH_MAG[2] + P(12,3)*SH_MAG[0] + P(12,2)*SK_MZ[2] + P(12,18)*SK_MZ[1] + P(12,16)*SK_MZ[4] - P(12,17)*SK_MZ[3]);
-				Kfusion[13] = SK_MZ[0]*(P(13,21) + P(13,0)*SH_MAG[1] - P(13,1)*SH_MAG[2] + P(13,3)*SH_MAG[0] + P(13,2)*SK_MZ[2] + P(13,18)*SK_MZ[1] + P(13,16)*SK_MZ[4] - P(13,17)*SK_MZ[3]);
-				Kfusion[14] = SK_MZ[0]*(P(14,21) + P(14,0)*SH_MAG[1] - P(14,1)*SH_MAG[2] + P(14,3)*SH_MAG[0] + P(14,2)*SK_MZ[2] + P(14,18)*SK_MZ[1] + P(14,16)*SK_MZ[4] - P(14,17)*SK_MZ[3]);
-				Kfusion[15] = SK_MZ[0]*(P(15,21) + P(15,0)*SH_MAG[1] - P(15,1)*SH_MAG[2] + P(15,3)*SH_MAG[0] + P(15,2)*SK_MZ[2] + P(15,18)*SK_MZ[1] + P(15,16)*SK_MZ[4] - P(15,17)*SK_MZ[3]);
-				Kfusion[22] = SK_MZ[0]*(P(22,21) + P(22,0)*SH_MAG[1] - P(22,1)*SH_MAG[2] + P(22,3)*SH_MAG[0] + P(22,2)*SK_MZ[2] + P(22,18)*SK_MZ[1] + P(22,16)*SK_MZ[4] - P(22,17)*SK_MZ[3]);
-				Kfusion[23] = SK_MZ[0]*(P(23,21) + P(23,0)*SH_MAG[1] - P(23,1)*SH_MAG[2] + P(23,3)*SH_MAG[0] + P(23,2)*SK_MZ[2] + P(23,18)*SK_MZ[1] + P(23,16)*SK_MZ[4] - P(23,17)*SK_MZ[3]);
-			} else {
-				for (uint8_t i = 0; i < 16; i++) {
-					Kfusion[i] = 0.0f;
-				}
-
-				Kfusion[22] = 0.0f;
-				Kfusion[23] = 0.0f;
+				Kfusion(0) = SK_MZ[0]*(P(0,21) + P(0,0)*SH_MAG[1] - P(0,1)*SH_MAG[2] + P(0,3)*SH_MAG[0] + P(0,2)*SK_MZ[2] + P(0,18)*SK_MZ[1] + P(0,16)*SK_MZ[4] - P(0,17)*SK_MZ[3]);
+				Kfusion(1) = SK_MZ[0]*(P(1,21) + P(1,0)*SH_MAG[1] - P(1,1)*SH_MAG[2] + P(1,3)*SH_MAG[0] + P(1,2)*SK_MZ[2] + P(1,18)*SK_MZ[1] + P(1,16)*SK_MZ[4] - P(1,17)*SK_MZ[3]);
+				Kfusion(2) = SK_MZ[0]*(P(2,21) + P(2,0)*SH_MAG[1] - P(2,1)*SH_MAG[2] + P(2,3)*SH_MAG[0] + P(2,2)*SK_MZ[2] + P(2,18)*SK_MZ[1] + P(2,16)*SK_MZ[4] - P(2,17)*SK_MZ[3]);
+				Kfusion(3) = SK_MZ[0]*(P(3,21) + P(3,0)*SH_MAG[1] - P(3,1)*SH_MAG[2] + P(3,3)*SH_MAG[0] + P(3,2)*SK_MZ[2] + P(3,18)*SK_MZ[1] + P(3,16)*SK_MZ[4] - P(3,17)*SK_MZ[3]);
+				Kfusion(4) = SK_MZ[0]*(P(4,21) + P(4,0)*SH_MAG[1] - P(4,1)*SH_MAG[2] + P(4,3)*SH_MAG[0] + P(4,2)*SK_MZ[2] + P(4,18)*SK_MZ[1] + P(4,16)*SK_MZ[4] - P(4,17)*SK_MZ[3]);
+				Kfusion(5) = SK_MZ[0]*(P(5,21) + P(5,0)*SH_MAG[1] - P(5,1)*SH_MAG[2] + P(5,3)*SH_MAG[0] + P(5,2)*SK_MZ[2] + P(5,18)*SK_MZ[1] + P(5,16)*SK_MZ[4] - P(5,17)*SK_MZ[3]);
+				Kfusion(6) = SK_MZ[0]*(P(6,21) + P(6,0)*SH_MAG[1] - P(6,1)*SH_MAG[2] + P(6,3)*SH_MAG[0] + P(6,2)*SK_MZ[2] + P(6,18)*SK_MZ[1] + P(6,16)*SK_MZ[4] - P(6,17)*SK_MZ[3]);
+				Kfusion(7) = SK_MZ[0]*(P(7,21) + P(7,0)*SH_MAG[1] - P(7,1)*SH_MAG[2] + P(7,3)*SH_MAG[0] + P(7,2)*SK_MZ[2] + P(7,18)*SK_MZ[1] + P(7,16)*SK_MZ[4] - P(7,17)*SK_MZ[3]);
+				Kfusion(8) = SK_MZ[0]*(P(8,21) + P(8,0)*SH_MAG[1] - P(8,1)*SH_MAG[2] + P(8,3)*SH_MAG[0] + P(8,2)*SK_MZ[2] + P(8,18)*SK_MZ[1] + P(8,16)*SK_MZ[4] - P(8,17)*SK_MZ[3]);
+				Kfusion(9) = SK_MZ[0]*(P(9,21) + P(9,0)*SH_MAG[1] - P(9,1)*SH_MAG[2] + P(9,3)*SH_MAG[0] + P(9,2)*SK_MZ[2] + P(9,18)*SK_MZ[1] + P(9,16)*SK_MZ[4] - P(9,17)*SK_MZ[3]);
+				Kfusion(10) = SK_MZ[0]*(P(10,21) + P(10,0)*SH_MAG[1] - P(10,1)*SH_MAG[2] + P(10,3)*SH_MAG[0] + P(10,2)*SK_MZ[2] + P(10,18)*SK_MZ[1] + P(10,16)*SK_MZ[4] - P(10,17)*SK_MZ[3]);
+				Kfusion(11) = SK_MZ[0]*(P(11,21) + P(11,0)*SH_MAG[1] - P(11,1)*SH_MAG[2] + P(11,3)*SH_MAG[0] + P(11,2)*SK_MZ[2] + P(11,18)*SK_MZ[1] + P(11,16)*SK_MZ[4] - P(11,17)*SK_MZ[3]);
+				Kfusion(12) = SK_MZ[0]*(P(12,21) + P(12,0)*SH_MAG[1] - P(12,1)*SH_MAG[2] + P(12,3)*SH_MAG[0] + P(12,2)*SK_MZ[2] + P(12,18)*SK_MZ[1] + P(12,16)*SK_MZ[4] - P(12,17)*SK_MZ[3]);
+				Kfusion(13) = SK_MZ[0]*(P(13,21) + P(13,0)*SH_MAG[1] - P(13,1)*SH_MAG[2] + P(13,3)*SH_MAG[0] + P(13,2)*SK_MZ[2] + P(13,18)*SK_MZ[1] + P(13,16)*SK_MZ[4] - P(13,17)*SK_MZ[3]);
+				Kfusion(14) = SK_MZ[0]*(P(14,21) + P(14,0)*SH_MAG[1] - P(14,1)*SH_MAG[2] + P(14,3)*SH_MAG[0] + P(14,2)*SK_MZ[2] + P(14,18)*SK_MZ[1] + P(14,16)*SK_MZ[4] - P(14,17)*SK_MZ[3]);
+				Kfusion(15) = SK_MZ[0]*(P(15,21) + P(15,0)*SH_MAG[1] - P(15,1)*SH_MAG[2] + P(15,3)*SH_MAG[0] + P(15,2)*SK_MZ[2] + P(15,18)*SK_MZ[1] + P(15,16)*SK_MZ[4] - P(15,17)*SK_MZ[3]);
+				Kfusion(22) = SK_MZ[0]*(P(22,21) + P(22,0)*SH_MAG[1] - P(22,1)*SH_MAG[2] + P(22,3)*SH_MAG[0] + P(22,2)*SK_MZ[2] + P(22,18)*SK_MZ[1] + P(22,16)*SK_MZ[4] - P(22,17)*SK_MZ[3]);
+				Kfusion(23) = SK_MZ[0]*(P(23,21) + P(23,0)*SH_MAG[1] - P(23,1)*SH_MAG[2] + P(23,3)*SH_MAG[0] + P(23,2)*SK_MZ[2] + P(23,18)*SK_MZ[1] + P(23,16)*SK_MZ[4] - P(23,17)*SK_MZ[3]);
 			}
 
-			Kfusion[16] = SK_MZ[0]*(P(16,21) + P(16,0)*SH_MAG[1] - P(16,1)*SH_MAG[2] + P(16,3)*SH_MAG[0] + P(16,2)*SK_MZ[2] + P(16,18)*SK_MZ[1] + P(16,16)*SK_MZ[4] - P(16,17)*SK_MZ[3]);
-			Kfusion[17] = SK_MZ[0]*(P(17,21) + P(17,0)*SH_MAG[1] - P(17,1)*SH_MAG[2] + P(17,3)*SH_MAG[0] + P(17,2)*SK_MZ[2] + P(17,18)*SK_MZ[1] + P(17,16)*SK_MZ[4] - P(17,17)*SK_MZ[3]);
-			Kfusion[18] = SK_MZ[0]*(P(18,21) + P(18,0)*SH_MAG[1] - P(18,1)*SH_MAG[2] + P(18,3)*SH_MAG[0] + P(18,2)*SK_MZ[2] + P(18,18)*SK_MZ[1] + P(18,16)*SK_MZ[4] - P(18,17)*SK_MZ[3]);
-			Kfusion[19] = SK_MZ[0]*(P(19,21) + P(19,0)*SH_MAG[1] - P(19,1)*SH_MAG[2] + P(19,3)*SH_MAG[0] + P(19,2)*SK_MZ[2] + P(19,18)*SK_MZ[1] + P(19,16)*SK_MZ[4] - P(19,17)*SK_MZ[3]);
-			Kfusion[20] = SK_MZ[0]*(P(20,21) + P(20,0)*SH_MAG[1] - P(20,1)*SH_MAG[2] + P(20,3)*SH_MAG[0] + P(20,2)*SK_MZ[2] + P(20,18)*SK_MZ[1] + P(20,16)*SK_MZ[4] - P(20,17)*SK_MZ[3]);
-			Kfusion[21] = SK_MZ[0]*(P(21,21) + P(21,0)*SH_MAG[1] - P(21,1)*SH_MAG[2] + P(21,3)*SH_MAG[0] + P(21,2)*SK_MZ[2] + P(21,18)*SK_MZ[1] + P(21,16)*SK_MZ[4] - P(21,17)*SK_MZ[3]);
+			Kfusion(16) = SK_MZ[0]*(P(16,21) + P(16,0)*SH_MAG[1] - P(16,1)*SH_MAG[2] + P(16,3)*SH_MAG[0] + P(16,2)*SK_MZ[2] + P(16,18)*SK_MZ[1] + P(16,16)*SK_MZ[4] - P(16,17)*SK_MZ[3]);
+			Kfusion(17) = SK_MZ[0]*(P(17,21) + P(17,0)*SH_MAG[1] - P(17,1)*SH_MAG[2] + P(17,3)*SH_MAG[0] + P(17,2)*SK_MZ[2] + P(17,18)*SK_MZ[1] + P(17,16)*SK_MZ[4] - P(17,17)*SK_MZ[3]);
+			Kfusion(18) = SK_MZ[0]*(P(18,21) + P(18,0)*SH_MAG[1] - P(18,1)*SH_MAG[2] + P(18,3)*SH_MAG[0] + P(18,2)*SK_MZ[2] + P(18,18)*SK_MZ[1] + P(18,16)*SK_MZ[4] - P(18,17)*SK_MZ[3]);
+			Kfusion(19) = SK_MZ[0]*(P(19,21) + P(19,0)*SH_MAG[1] - P(19,1)*SH_MAG[2] + P(19,3)*SH_MAG[0] + P(19,2)*SK_MZ[2] + P(19,18)*SK_MZ[1] + P(19,16)*SK_MZ[4] - P(19,17)*SK_MZ[3]);
+			Kfusion(20) = SK_MZ[0]*(P(20,21) + P(20,0)*SH_MAG[1] - P(20,1)*SH_MAG[2] + P(20,3)*SH_MAG[0] + P(20,2)*SK_MZ[2] + P(20,18)*SK_MZ[1] + P(20,16)*SK_MZ[4] - P(20,17)*SK_MZ[3]);
+			Kfusion(21) = SK_MZ[0]*(P(21,21) + P(21,0)*SH_MAG[1] - P(21,1)*SH_MAG[2] + P(21,3)*SH_MAG[0] + P(21,2)*SK_MZ[2] + P(21,18)*SK_MZ[1] + P(21,16)*SK_MZ[4] - P(21,17)*SK_MZ[3]);
 
-		} else {
-			return;
 		}
 
 		// apply covariance correction via P_new = (I -K*H)*P
 		// first calculate expression for KHP
 		// then calculate P - KHP
-		matrix::SquareMatrix<float, _k_num_states> KHP {};
+		SquareMatrix24f KHP;
 		float KH[10];
 
 		for (unsigned row = 0; row < _k_num_states; row++) {
 
-			KH[0] = Kfusion[row] * H_MAG[0];
-			KH[1] = Kfusion[row] * H_MAG[1];
-			KH[2] = Kfusion[row] * H_MAG[2];
-			KH[3] = Kfusion[row] * H_MAG[3];
-			KH[4] = Kfusion[row] * H_MAG[16];
-			KH[5] = Kfusion[row] * H_MAG[17];
-			KH[6] = Kfusion[row] * H_MAG[18];
-			KH[7] = Kfusion[row] * H_MAG[19];
-			KH[8] = Kfusion[row] * H_MAG[20];
-			KH[9] = Kfusion[row] * H_MAG[21];
+			KH[0] = Kfusion(row) * H_MAG(0);
+			KH[1] = Kfusion(row) * H_MAG(1);
+			KH[2] = Kfusion(row) * H_MAG(2);
+			KH[3] = Kfusion(row) * H_MAG(3);
+			KH[4] = Kfusion(row) * H_MAG(16);
+			KH[5] = Kfusion(row) * H_MAG(17);
+			KH[6] = Kfusion(row) * H_MAG(18);
+			KH[7] = Kfusion(row) * H_MAG(19);
+			KH[8] = Kfusion(row) * H_MAG(20);
+			KH[9] = Kfusion(row) * H_MAG(21);
 
 			for (unsigned column = 0; column < _k_num_states; column++) {
 				float tmp = KH[0] * P(0,column);
@@ -387,47 +363,26 @@ void Ekf::fuseMag()
 			}
 		}
 
-		// if the covariance correction will result in a negative variance, then
-		// the covariance matrix is unhealthy and must be corrected
-		_fault_status.flags.bad_mag_x = false;
-		_fault_status.flags.bad_mag_y = false;
-		_fault_status.flags.bad_mag_z = false;
+		const bool healthy = checkAndFixCovarianceUpdate(KHP);
 
-		for (int i = 0; i < _k_num_states; i++) {
-			if (P(i,i) < KHP(i,i)) {
-				// zero rows and columns
-				P.uncorrelateCovarianceSetVariance<1>(i, 0.0f);
+		if (index == 0) {
+			_fault_status.flags.bad_mag_x = !healthy;
 
-				//flag as unhealthy
-				healthy = false;
+		} else if (index == 1) {
+			_fault_status.flags.bad_mag_y = !healthy;
 
-				// update individual measurement health status
-				if (index == 0) {
-					_fault_status.flags.bad_mag_x = true;
-
-				} else if (index == 1) {
-					_fault_status.flags.bad_mag_y = true;
-
-				} else if (index == 2) {
-					_fault_status.flags.bad_mag_z = true;
-				}
-			}
+		} else if (index == 2) {
+			_fault_status.flags.bad_mag_z = !healthy;
 		}
 
-		// only apply covariance and state corrections if healthy
 		if (healthy) {
 			// apply the covariance corrections
-			for (unsigned row = 0; row < _k_num_states; row++) {
-				for (unsigned column = 0; column < _k_num_states; column++) {
-					P(row,column) = P(row,column) - KHP(row,column);
-				}
-			}
+			P -= KHP;
 
-			// correct the covariance matrix for gross errors
 			fixCovarianceErrors(true);
 
 			// apply the state corrections
-			fuse(Kfusion, _mag_innov[index]);
+			fuse(Kfusion, _mag_innov(index));
 
 			// constrain the declination of the earth field states
 			limitDeclination();
@@ -520,7 +475,6 @@ void Ekf::fuseYaw321(float yaw, float yaw_variance, bool zero_innovation)
 	if (zero_innovation) {
 		innovation = 0.0f;
 	} else {
-		Eulerf euler321(_state.quat_nominal);
 		innovation = wrap_pi(atan2f(_R_to_earth(1, 0), _R_to_earth(0, 0)) - measurement);
 	}
 
@@ -658,27 +612,23 @@ void Ekf::updateQuaternion(const float innovation, const float variance, const f
 
 	// calculate the Kalman gains
 	// only calculate gains for states we are using
-	float Kfusion[_k_num_states] = {};
+	Vector24f Kfusion;
 
 	for (uint8_t row = 0; row <= 15; row++) {
-		Kfusion[row] = 0.0f;
-
 		for (uint8_t col = 0; col <= 3; col++) {
 			Kfusion(row) += P(row,col) * yaw_jacobian(col);
 		}
 
-		Kfusion[row] *= heading_innov_var_inv;
+		Kfusion(row) *= heading_innov_var_inv;
 	}
 
 	if (_control_status.flags.wind) {
 		for (uint8_t row = 22; row <= 23; row++) {
-			Kfusion[row] = 0.0f;
-
 			for (uint8_t col = 0; col <= 3; col++) {
 				Kfusion(row) += P(row,col) * yaw_jacobian(col);
 			}
 
-			Kfusion[row] *= heading_innov_var_inv;
+			Kfusion(row) *= heading_innov_var_inv;
 		}
 	}
 
@@ -686,7 +636,7 @@ void Ekf::updateQuaternion(const float innovation, const float variance, const f
 	_yaw_test_ratio = sq(innovation) / (sq(gate_sigma) * _heading_innov_var);
 
 	// we are no longer using 3-axis fusion so set the reported test levels to zero
-	memset(_mag_test_ratio, 0, sizeof(_mag_test_ratio));
+	_mag_test_ratio.setZero();
 
 	// set the magnetometer unhealthy if the test fails
 	if (_yaw_test_ratio > 1.0f) {
@@ -712,7 +662,7 @@ void Ekf::updateQuaternion(const float innovation, const float variance, const f
 	// apply covariance correction via P_new = (I -K*H)*P
 	// first calculate expression for KHP
 	// then calculate P - KHP
-	matrix::SquareMatrix<float, _k_num_states> KHP;
+	SquareMatrix24f KHP;
 	float KH[4];
 
 	for (unsigned row = 0; row < _k_num_states; row++) {
@@ -731,35 +681,14 @@ void Ekf::updateQuaternion(const float innovation, const float variance, const f
 		}
 	}
 
-	// if the covariance correction will result in a negative variance, then
-	// the covariance matrix is unhealthy and must be corrected
-	bool healthy = true;
-	_fault_status.flags.bad_hdg = false;
+	const bool healthy = checkAndFixCovarianceUpdate(KHP);
 
-	for (int i = 0; i < _k_num_states; i++) {
-		if (P(i,i) < KHP(i,i)) {
-			// zero rows and columns
-			P.uncorrelateCovarianceSetVariance<1>(i, 0.0f);
+	_fault_status.flags.bad_hdg = !healthy;
 
-			//flag as unhealthy
-			healthy = false;
-
-			// update individual measurement health status
-			_fault_status.flags.bad_hdg = true;
-
-		}
-	}
-
-	// only apply covariance and state corrections if healthy
 	if (healthy) {
 		// apply the covariance corrections
-		for (unsigned row = 0; row < _k_num_states; row++) {
-			for (unsigned column = 0; column < _k_num_states; column++) {
-				P(row,column) = P(row,column) - KHP(row,column);
-			}
-		}
+		P -= KHP;
 
-		// correct the covariance matrix for gross errors
 		fixCovarianceErrors(true);
 
 		// apply the state corrections
@@ -825,15 +754,15 @@ void Ekf::fuseHeading()
 
 		// handle special case where yaw measurement is unavailable
 		bool fuse_zero_innov = false;
-		if (_yaw_use_inhibit) {
+		if (_is_yaw_fusion_inhibited) {
 			// The yaw measurement cannot be trusted but we need to fuse something to prevent a badly
 			// conditioned covariance matrix developing over time.
 			if (!_control_status.flags.vehicle_at_rest) {
 				// Vehicle is not at rest so fuse a zero innovation if necessary to prevent
-				// unconstrained quaterniion variance growth and record the predicted heading
+				// unconstrained quaternion variance growth and record the predicted heading
 				// to use as an observation when movement ceases.
 				// TODO a better way of determining when this is necessary
-				float sumQuatVar = P(0,0) + P(1,1) + P(2,2) + P(3,3);
+				const float sumQuatVar = P(0,0) + P(1,1) + P(2,2) + P(3,3);
 				if (sumQuatVar > _params.quat_max_variance) {
 					fuse_zero_innov = true;
 					R_YAW = 0.25f;
@@ -863,10 +792,9 @@ void Ekf::fuseHeading()
 
 			// Calculate the body to earth frame rotation matrix from the euler angles using a 312 rotation sequence
 			// with yaw angle set to to zero
-			Vector3f rotVec312;
-			rotVec312(0) = 0.0f; // first rotation (yaw) set to zero for alter use when rotating the mag field into earth frame
-			rotVec312(1) = asinf(_R_to_earth(2, 1)); // second rotation (roll)
-			rotVec312(2) = atan2f(-_R_to_earth(2, 0), _R_to_earth(2, 2)); // third rotation (pitch)
+			const Vector3f rotVec312(0.0f,  // yaw
+						 asinf(_R_to_earth(2, 1)),  // roll
+						 atan2f(-_R_to_earth(2, 0), _R_to_earth(2, 2)));  // pitch
 			const Dcmf R_to_earth = taitBryan312ToRotMat(rotVec312);
 
 			// rotate the magnetometer measurements into earth frame using a zero yaw angle
@@ -893,7 +821,7 @@ void Ekf::fuseHeading()
 
 		// handle special case where yaw measurement is unavailable
 		bool fuse_zero_innov = false;
-		if (_yaw_use_inhibit) {
+		if (_is_yaw_fusion_inhibited) {
 			// The yaw measurement cannot be trusted but we need to fuse something to prevent a badly
 			// conditioned covariance matrix developing over time.
 			if (!_control_status.flags.vehicle_at_rest) {
@@ -901,7 +829,7 @@ void Ekf::fuseHeading()
 				// unconstrained quaterniion variance growth and record the predicted heading
 				// to use as an observation when movement ceases.
 				// TODO a better way of determining when this is necessary
-				float sumQuatVar = P(0,0) + P(1,1) + P(2,2) + P(3,3);
+				const float sumQuatVar = P(0,0) + P(1,1) + P(2,2) + P(3,3);
 				if (sumQuatVar > _params.quat_max_variance) {
 					fuse_zero_innov = true;
 					R_YAW = 0.25f;
@@ -933,7 +861,7 @@ void Ekf::fuseDeclination(float decl_sigma)
 	const float magE = _state.mag_I(1);
 
 	// minimum horizontal field strength before calculation becomes badly conditioned (T)
-	const float h_field_min = 0.001f;
+	constexpr float h_field_min = 0.001f;
 
 	// observation variance (rad**2)
 	const float R_DECL = sq(decl_sigma);
@@ -974,36 +902,36 @@ void Ekf::fuseDeclination(float decl_sigma)
 
 	// Calculate the observation Jacobian
 	// Note only 2 terms are non-zero which can be used in matrix operations for calculation of Kalman gains and covariance update to significantly reduce cost
-	float H_DECL[24] = {};
-	H_DECL[16] = -magE*t21;
-	H_DECL[17] = magN*t21;
+	Vector24f H_DECL;
+	H_DECL(16) = -magE*t21;
+	H_DECL(17) = magN*t21;
 
 	// Calculate the Kalman gains
-	float Kfusion[_k_num_states] = {};
-	Kfusion[0] = -t4*t13*(P(0,16)*magE-P(0,17)*magN);
-	Kfusion[1] = -t4*t13*(P(1,16)*magE-P(1,17)*magN);
-	Kfusion[2] = -t4*t13*(P(2,16)*magE-P(2,17)*magN);
-	Kfusion[3] = -t4*t13*(P(3,16)*magE-P(3,17)*magN);
-	Kfusion[4] = -t4*t13*(P(4,16)*magE-P(4,17)*magN);
-	Kfusion[5] = -t4*t13*(P(5,16)*magE-P(5,17)*magN);
-	Kfusion[6] = -t4*t13*(P(6,16)*magE-P(6,17)*magN);
-	Kfusion[7] = -t4*t13*(P(7,16)*magE-P(7,17)*magN);
-	Kfusion[8] = -t4*t13*(P(8,16)*magE-P(8,17)*magN);
-	Kfusion[9] = -t4*t13*(P(9,16)*magE-P(9,17)*magN);
-	Kfusion[10] = -t4*t13*(P(10,16)*magE-P(10,17)*magN);
-	Kfusion[11] = -t4*t13*(P(11,16)*magE-P(11,17)*magN);
-	Kfusion[12] = -t4*t13*(P(12,16)*magE-P(12,17)*magN);
-	Kfusion[13] = -t4*t13*(P(13,16)*magE-P(13,17)*magN);
-	Kfusion[14] = -t4*t13*(P(14,16)*magE-P(14,17)*magN);
-	Kfusion[15] = -t4*t13*(P(15,16)*magE-P(15,17)*magN);
-	Kfusion[16] = -t4*t13*(P(16,16)*magE-P(16,17)*magN);
-	Kfusion[17] = -t4*t13*(P(17,16)*magE-P(17,17)*magN);
-	Kfusion[18] = -t4*t13*(P(18,16)*magE-P(18,17)*magN);
-	Kfusion[19] = -t4*t13*(P(19,16)*magE-P(19,17)*magN);
-	Kfusion[20] = -t4*t13*(P(20,16)*magE-P(20,17)*magN);
-	Kfusion[21] = -t4*t13*(P(21,16)*magE-P(21,17)*magN);
-	Kfusion[22] = -t4*t13*(P(22,16)*magE-P(22,17)*magN);
-	Kfusion[23] = -t4*t13*(P(23,16)*magE-P(23,17)*magN);
+	Vector24f Kfusion;
+	Kfusion(0) = -t4*t13*(P(0,16)*magE-P(0,17)*magN);
+	Kfusion(1) = -t4*t13*(P(1,16)*magE-P(1,17)*magN);
+	Kfusion(2) = -t4*t13*(P(2,16)*magE-P(2,17)*magN);
+	Kfusion(3) = -t4*t13*(P(3,16)*magE-P(3,17)*magN);
+	Kfusion(4) = -t4*t13*(P(4,16)*magE-P(4,17)*magN);
+	Kfusion(5) = -t4*t13*(P(5,16)*magE-P(5,17)*magN);
+	Kfusion(6) = -t4*t13*(P(6,16)*magE-P(6,17)*magN);
+	Kfusion(7) = -t4*t13*(P(7,16)*magE-P(7,17)*magN);
+	Kfusion(8) = -t4*t13*(P(8,16)*magE-P(8,17)*magN);
+	Kfusion(9) = -t4*t13*(P(9,16)*magE-P(9,17)*magN);
+	Kfusion(10) = -t4*t13*(P(10,16)*magE-P(10,17)*magN);
+	Kfusion(11) = -t4*t13*(P(11,16)*magE-P(11,17)*magN);
+	Kfusion(12) = -t4*t13*(P(12,16)*magE-P(12,17)*magN);
+	Kfusion(13) = -t4*t13*(P(13,16)*magE-P(13,17)*magN);
+	Kfusion(14) = -t4*t13*(P(14,16)*magE-P(14,17)*magN);
+	Kfusion(15) = -t4*t13*(P(15,16)*magE-P(15,17)*magN);
+	Kfusion(16) = -t4*t13*(P(16,16)*magE-P(16,17)*magN);
+	Kfusion(17) = -t4*t13*(P(17,16)*magE-P(17,17)*magN);
+	Kfusion(18) = -t4*t13*(P(18,16)*magE-P(18,17)*magN);
+	Kfusion(19) = -t4*t13*(P(19,16)*magE-P(19,17)*magN);
+	Kfusion(20) = -t4*t13*(P(20,16)*magE-P(20,17)*magN);
+	Kfusion(21) = -t4*t13*(P(21,16)*magE-P(21,17)*magN);
+	Kfusion(22) = -t4*t13*(P(22,16)*magE-P(22,17)*magN);
+	Kfusion(23) = -t4*t13*(P(23,16)*magE-P(23,17)*magN);
 
 	const float innovation = math::constrain(atan2f(magE, magN) - getMagDeclination(), -0.5f, 0.5f);
 
@@ -1011,12 +939,12 @@ void Ekf::fuseDeclination(float decl_sigma)
 	// first calculate expression for KHP
 	// then calculate P - KHP
 	// take advantage of the empty columns in KH to reduce the number of operations
-	matrix::SquareMatrix<float, _k_num_states> KHP;
+	SquareMatrix24f KHP;
 	float KH[2];
 	for (unsigned row = 0; row < _k_num_states; row++) {
 
-		KH[0] = Kfusion[row] * H_DECL[16];
-		KH[1] = Kfusion[row] * H_DECL[17];
+		KH[0] = Kfusion(row) * H_DECL(16);
+		KH[1] = Kfusion(row) * H_DECL(17);
 
 		for (unsigned column = 0; column < _k_num_states; column++) {
 			float tmp = KH[0] * P(16,column);
@@ -1025,34 +953,14 @@ void Ekf::fuseDeclination(float decl_sigma)
 		}
 	}
 
-	// if the covariance correction will result in a negative variance, then
-	// the covariance matrix is unhealthy and must be corrected
-	bool healthy = true;
-	_fault_status.flags.bad_mag_decl = false;
-	for (int i = 0; i < _k_num_states; i++) {
-		if (P(i,i) < KHP(i,i)) {
-			// zero rows and columns
-			P.uncorrelateCovarianceSetVariance<1>(i, 0.0f);
+	const bool healthy = checkAndFixCovarianceUpdate(KHP);
 
-			//flag as unhealthy
-			healthy = false;
+	_fault_status.flags.bad_mag_decl = !healthy;
 
-			// update individual measurement health status
-			_fault_status.flags.bad_mag_decl = true;
-
-		}
-	}
-
-	// only apply covariance and state corrections if healthy
 	if (healthy) {
 		// apply the covariance corrections
-		for (unsigned row = 0; row < _k_num_states; row++) {
-			for (unsigned column = 0; column < _k_num_states; column++) {
-				P(row,column) = P(row,column) - KHP(row,column);
-			}
-		}
+		P -= KHP;
 
-		// correct the covariance matrix for gross errors
 		fixCovarianceErrors(true);
 
 		// apply the state corrections
@@ -1101,7 +1009,7 @@ void Ekf::limitDeclination()
 	}
 
 	// do not allow the declination estimate to vary too much relative to the reference value
-	const float decl_tolerance = 0.5f;
+	constexpr float decl_tolerance = 0.5f;
 	const float decl_max = decl_reference + decl_tolerance;
 	const float decl_min = decl_reference - decl_tolerance;
 	const float decl_estimate = atan2f(_state.mag_I(1) , _state.mag_I(0));

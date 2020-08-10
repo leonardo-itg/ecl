@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2019 Todd Stellanova. All rights reserved.
+ *   Copyright (c) 2019 ECL Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -12,9 +12,9 @@
  *    notice, this list of conditions and the following disclaimer in
  *    the documentation and/or other materials provided with the
  *    distribution.
- * 3. Neither the name of the copyright holder nor the names of its
- *    contributors may be  used to endorse or promote products derived
- *    from this software without specific prior written permission.
+ * 3. Neither the name PX4 nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
@@ -31,38 +31,27 @@
  *
  ****************************************************************************/
 
-#ifndef ECL_TESTS_COMMON_H
-#define ECL_TESTS_COMMON_H
-
-#include <validation/data_validator.h>
-
 /**
- * Insert a series of samples around a mean value
- * @param validator The validator under test
- * @param mean The mean value
- * @param count The number of samples to insert in the validator
- * @param rms_err (out) calculated rms error of the inserted samples
- * @param timestamp_io (in/out) in: start timestamp, out: last timestamp
+ * @file test_EKF_utils.cpp
+ *
+ * @brief Unit tests for the miscellaneous EKF utilities
  */
-void insert_values_around_mean(DataValidator *validator, const float mean, uint32_t count, float *rms_err,
-			       uint64_t *timestamp_io);
 
-/**
- * Print out the state of a DataValidator
- * @param validator
- */
-void dump_validator_state(DataValidator *validator);
+#include <gtest/gtest.h>
+#include <cmath>
+#include <vector>
 
-/**
- * Insert a time series of samples into the validator
- * @param validator
- * @param incr_value The amount to increment the value by on each iteration
- * @param value_io (in/out) in: initial value, out: final value
- * @param timestamp_io (in/out) in: initial timestamp, out: final timestamp
- */
-void fill_validator_with_samples(DataValidator *validator,
-				 const float incr_value,
-				 float *value_io,
-				 uint64_t *timestamp_io);
+#include "EKF/utils.hpp"
 
-#endif //ECL_TESTS_COMMON_H
+TEST(eclPowfTest, compareToStandardImplementation)
+{
+	std::vector<int> exponents = {-3,-2,-1,-0,0,1,2,3};
+	std::vector<float> bases = {-INFINITY, -11.1f,-0.5f, -0.f, 0.f, 0.5f, 11.1f, INFINITY};
+
+	for (auto const exponent : exponents) {
+		for (auto const basis : bases) {
+			EXPECT_EQ(ecl::powf(basis, exponent),
+				  std::pow(basis, static_cast<float>(exponent)));
+		}
+	}
+}

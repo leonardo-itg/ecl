@@ -67,7 +67,7 @@ void Ekf::fuseOptFlow()
 	float Kfusion[24][2] = {}; // Optical flow Kalman gains
 
 	// get rotation matrix from earth to body
-	const Dcmf earth_to_body = quat_to_invrotmat(_state.quat_nominal);
+	const Dcmf earth_to_body = quatToInverseRotMat(_state.quat_nominal);
 
 	// calculate the sensor position relative to the IMU
 	const Vector3f pos_offset_body = _params.flow_pos_body - _params.imu_pos_body;
@@ -101,13 +101,11 @@ void Ekf::fuseOptFlow()
 	// calculate optical LOS rates using optical flow rates that have had the body angular rate contribution removed
 	// correct for gyro bias errors in the data used to do the motion compensation
 	// Note the sign convention used: A positive LOS rate is a RH rotation of the scene about that axis.
-	Vector2f opt_flow_rate;
-	opt_flow_rate(0) = _flow_compensated_XY_rad(0) / _flow_sample_delayed.dt + _flow_gyro_bias(0);
-	opt_flow_rate(1) = _flow_compensated_XY_rad(1) / _flow_sample_delayed.dt + _flow_gyro_bias(1);
+	const Vector2f opt_flow_rate = _flow_compensated_XY_rad / _flow_sample_delayed.dt + Vector2f(_flow_gyro_bias);
 
 	if (opt_flow_rate.norm() < _flow_max_rate) {
-		_flow_innov[0] =  vel_body(1) / range - opt_flow_rate(0); // flow around the X axis
-		_flow_innov[1] = -vel_body(0) / range - opt_flow_rate(1); // flow around the Y axis
+		_flow_innov(0) =  vel_body(1) / range - opt_flow_rate(0); // flow around the X axis
+		_flow_innov(1) = -vel_body(0) / range - opt_flow_rate(1); // flow around the Y axis
 
 	} else {
 		return;
@@ -222,18 +220,16 @@ void Ekf::fuseOptFlow()
 			float t87 = t2*t22*t56;
 			float t92 = t2*t7*t69;
 			float t77 = R_LOS+t37+t43+t50+t63+t76-t87-t92;
-			float t78;
 
-			// calculate innovation variance for X axis observation and protect against a badly conditioned calculation
-			if (t77 >= R_LOS) {
-				t78 = 1.0f / t77;
-				_flow_innov_var[0] = t77;
-
-			} else {
+			// protect against a badly conditioned calculation
+			if (t77 < R_LOS) {
 				// we need to reinitialise the covariance matrix and abort this fusion step
 				initialiseCovariance();
 				return;
 			}
+
+			float t78 = 1.0f / t77;
+			_flow_innov_var(0) = t77;
 
 			// calculate Kalman gains for X-axis observation
 			Kfusion[0][0] = t78*(t12-P(0,4)*t2*t7+P(0,1)*t2*t15+P(0,6)*t2*t10+P(0,2)*t2*t19-P(0,3)*t2*t22+P(0,5)*t2*t27);
@@ -365,17 +361,16 @@ void Ekf::fuseOptFlow()
 			float t85 = t2*t19*t49;
 			float t94 = t2*t10*t76;
 			float t77 = R_LOS+t37+t43+t56+t63+t70-t85-t94;
-			float t78;
-			// calculate innovation variance for Y axis observation and protect against a badly conditioned calculation
-			if (t77 >= R_LOS) {
-				t78 = 1.0f / t77;
-				_flow_innov_var[1] = t77;
 
-			} else {
+			// protect against a badly conditioned calculation
+			if (t77 < R_LOS) {
 				// we need to reinitialise the covariance matrix and abort this fusion step
 				initialiseCovariance();
 				return;
 			}
+
+			float t78 = 1.0f / t77;
+			_flow_innov_var(1) = t77;
 
 			// calculate Kalman gains for Y-axis observation
 			Kfusion[0][1] = -t78*(t12+P(0,5)*t2*t8-P(0,6)*t2*t10+P(0,1)*t2*t16-P(0,2)*t2*t19+P(0,3)*t2*t22+P(0,4)*t2*t27);
@@ -409,8 +404,8 @@ void Ekf::fuseOptFlow()
 	// run the innovation consistency check and record result
 	bool flow_fail = false;
 	float test_ratio[2];
-	test_ratio[0] = sq(_flow_innov[0]) / (sq(math::max(_params.flow_innov_gate, 1.0f)) * _flow_innov_var[0]);
-	test_ratio[1] = sq(_flow_innov[1]) / (sq(math::max(_params.flow_innov_gate, 1.0f)) * _flow_innov_var[1]);
+	test_ratio[0] = sq(_flow_innov(0)) / (sq(math::max(_params.flow_innov_gate, 1.0f)) * _flow_innov_var(0));
+	test_ratio[1] = sq(_flow_innov(1)) / (sq(math::max(_params.flow_innov_gate, 1.0f)) * _flow_innov_var(1));
 	_optflow_test_ratio = math::max(test_ratio[0],test_ratio[1]);
 
 	for (uint8_t obs_index = 0; obs_index <= 1; obs_index++) {
@@ -433,27 +428,27 @@ void Ekf::fuseOptFlow()
 	for (uint8_t obs_index = 0; obs_index <= 1; obs_index++) {
 
 		// copy the Kalman gain vector for the axis we are fusing
-		float gain[24];
+		Vector24f gain;
 
 		for (unsigned row = 0; row <= 23; row++) {
-			gain[row] = Kfusion[row][obs_index];
+			gain(row) = Kfusion[row][obs_index];
 		}
 
 		// apply covariance correction via P_new = (I -K*H)*P
 		// first calculate expression for KHP
 		// then calculate P - KHP
-		matrix::SquareMatrix<float, _k_num_states> KHP;
+		SquareMatrix24f KHP;
 		float KH[7];
 
 		for (unsigned row = 0; row < _k_num_states; row++) {
 
-			KH[0] = gain[row] * H_LOS[obs_index][0];
-			KH[1] = gain[row] * H_LOS[obs_index][1];
-			KH[2] = gain[row] * H_LOS[obs_index][2];
-			KH[3] = gain[row] * H_LOS[obs_index][3];
-			KH[4] = gain[row] * H_LOS[obs_index][4];
-			KH[5] = gain[row] * H_LOS[obs_index][5];
-			KH[6] = gain[row] * H_LOS[obs_index][6];
+			KH[0] = gain(row) * H_LOS[obs_index][0];
+			KH[1] = gain(row) * H_LOS[obs_index][1];
+			KH[2] = gain(row) * H_LOS[obs_index][2];
+			KH[3] = gain(row) * H_LOS[obs_index][3];
+			KH[4] = gain(row) * H_LOS[obs_index][4];
+			KH[5] = gain(row) * H_LOS[obs_index][5];
+			KH[6] = gain(row) * H_LOS[obs_index][6];
 
 			for (unsigned column = 0; column < _k_num_states; column++) {
 				float tmp = KH[0] * P(0,column);
@@ -467,44 +462,23 @@ void Ekf::fuseOptFlow()
 			}
 		}
 
-		// if the covariance correction will result in a negative variance, then
-		// the covariance matrix is unhealthy and must be corrected
-		bool healthy = true;
-		_fault_status.flags.bad_optflow_X = false;
-		_fault_status.flags.bad_optflow_Y = false;
+		const bool healthy = checkAndFixCovarianceUpdate(KHP);
 
-		for (int i = 0; i < _k_num_states; i++) {
-			if (P(i,i) < KHP(i,i)) {
-				// zero rows and columns
-				P.uncorrelateCovarianceSetVariance<1>(i, 0.0f);
+		if (obs_index == 0) {
+			_fault_status.flags.bad_optflow_X = !healthy;
 
-				//flag as unhealthy
-				healthy = false;
-
-				// update individual measurement health status
-				if (obs_index == 0) {
-					_fault_status.flags.bad_optflow_X = true;
-
-				} else if (obs_index == 1) {
-					_fault_status.flags.bad_optflow_Y = true;
-				}
-			}
+		} else if (obs_index == 1) {
+			_fault_status.flags.bad_optflow_Y = !healthy;
 		}
 
-		// only apply covariance and state corrections if healthy
 		if (healthy) {
 			// apply the covariance corrections
-			for (unsigned row = 0; row < _k_num_states; row++) {
-				for (unsigned column = 0; column < _k_num_states; column++) {
-					P(row,column) = P(row,column) - KHP(row,column);
-				}
-			}
+			P -= KHP;
 
-			// correct the covariance matrix for gross errors
 			fixCovarianceErrors(true);
 
 			// apply the state corrections
-			fuse(gain, _flow_innov[obs_index]);
+			fuse(gain, _flow_innov(obs_index));
 
 			_time_last_of_fuse = _time_last_imu;
 		}

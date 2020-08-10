@@ -14,8 +14,9 @@ EKFGSF_yaw::EKFGSF_yaw()
 }
 
 void EKFGSF_yaw::update(const imuSample& imu_sample,
-                	bool run_EKF,           // set to true when flying or movement is suitable for yaw estimation
-                	float airspeed)   	// true airspeed used for centripetal accel compensation - set to 0 when not required.
+			bool run_EKF,			// set to true when flying or movement is suitable for yaw estimation
+			float airspeed,			// true airspeed used for centripetal accel compensation - set to 0 when not required.
+			const Vector3f &imu_gyro_bias)  // estimated rate gyro bias (rad/sec)
 {
 	// copy to class variables
 	_delta_ang = imu_sample.delta_ang;
@@ -60,6 +61,11 @@ void EKFGSF_yaw::update(const imuSample& imu_sample,
 		if (!_ekf_gsf_vel_fuse_started) {
 			initialiseEKFGSF();
 			ahrsAlignYaw();
+			// Initialise to gyro bias estimate from main filter because there could be a large
+			// uncorrected rate gyro bias error about the gravity vector
+			for (uint8_t model_index = 0; model_index < N_MODELS_EKFGSF; model_index ++) {
+				_ahrs_ekf_gsf[model_index].gyro_bias = imu_gyro_bias;
+			}
 			_ekf_gsf_vel_fuse_started = true;
 		} else {
 			bool bad_update = false;
@@ -230,10 +236,10 @@ void EKFGSF_yaw::ahrsAlignYaw()
 
 		} else {
 			// Calculate the 312 Tait-Bryan rotation sequence that rotates from earth to body frame
-			Vector3f rot312;
-			rot312(0) = wrap_pi(_ekf_gsf[model_index].X(2)); // first rotation (yaw) taken from EKF model state
-			rot312(1) = asinf(_ahrs_ekf_gsf[model_index].R(2, 1)); // second rotation (roll)
-			rot312(2) = atan2f(-_ahrs_ekf_gsf[model_index].R(2, 0), _ahrs_ekf_gsf[model_index].R(2, 2));  // third rotation (pitch)
+			const Vector3f rot312(wrap_pi(_ekf_gsf[model_index].X(2)),  // yaw
+					      asinf(_ahrs_ekf_gsf[model_index].R(2, 1)),  // roll
+					      atan2f(-_ahrs_ekf_gsf[model_index].R(2, 0),
+						      _ahrs_ekf_gsf[model_index].R(2, 2)));  // pitch
 
 			// Calculate the body to earth frame rotation matrix
 			_ahrs_ekf_gsf[model_index].R = taitBryan312ToRotMat(rot312);
@@ -306,7 +312,7 @@ void EKFGSF_yaw::predictEKF(const uint8_t model_index)
 	const float t15 = P22*t10;
 	const float t16 = P12+t15;
 
-	const float min_var = 1e-6f;
+	constexpr float min_var = 1e-6f;
 	_ekf_gsf[model_index].P(0,0) = fmaxf(P00-P20*t6+dvxVar*t14+dvyVar*t13-t6*t7 , min_var);
 	_ekf_gsf[model_index].P(0,1) = P01+t12-P21*t6+t7*t10-dvyVar*t2*t3;
 	_ekf_gsf[model_index].P(0,2) = t7;
@@ -350,17 +356,14 @@ bool EKFGSF_yaw::updateEKF(const uint8_t model_index)
 	// Update the inverse of the innovation covariance matrix S_inverse
 	updateInnovCovMatInv(model_index, S);
 
-	// Perform a chi-square innovation consistency test and calculate a compression scale factor that limits the magnitude of innovations to 5-sigma
-	float innov_comp_scale_factor = 1.0f;
-
 	// test ratio = transpose(innovation) * inverse(innovation variance) * innovation = [1x2] * [2,2] * [2,1] = [1,1]
 	const float test_ratio = _ekf_gsf[model_index].innov * (_ekf_gsf[model_index].S_inverse * _ekf_gsf[model_index].innov);
 
+	// Perform a chi-square innovation consistency test and calculate a compression scale factor
+	// that limits the magnitude of innovations to 5-sigma
 	// If the test ratio is greater than 25 (5 Sigma) then reduce the length of the innovation vector to clip it at 5-Sigma
 	// This protects from large measurement spikes
-	if (test_ratio > 25.0f) {
-		innov_comp_scale_factor = sqrtf(25.0f / test_ratio);
-	}
+	const float innov_comp_scale_factor = test_ratio > 25.f ? sqrtf(25.0f / test_ratio) : 1.f;
 
 	// calculate Kalman gain K  nd covariance matrix P
 	// autocode from https://github.com/priseborough/3_state_filter/blob/flightLogReplay-wip/calcK.txt
@@ -371,13 +374,11 @@ bool EKFGSF_yaw::updateEKF(const uint8_t model_index)
 	const float t5 = P00*P11;
 	const float t9 = P01*P10;
 	const float t6 = t2+t3+t4+t5-t9;
-	float t7;
-	if (fabsf(t6) > 1e-6f) {
-		t7 = 1.0f/t6;
-	} else {
-		// skip this fusion step
+	if (fabsf(t6) < 1e-6f) {
+		// skip the fusion step
 		return false;
 	}
+	const float t7 = 1.f / t6;
 	const float t8 = P11+velObsVar;
 	const float t10 = P00+velObsVar;
 
@@ -530,30 +531,6 @@ bool EKFGSF_yaw::getLogData(float *yaw_composite, float *yaw_variance, float yaw
 	return false;
 }
 
-Dcmf EKFGSF_yaw::taitBryan312ToRotMat(const Vector3f &rot312)
-{
-	// Calculate the frame2 to frame 1 rotation matrix from a 312 rotation sequence
-	const float c2 = cosf(rot312(2));
-	const float s2 = sinf(rot312(2));
-	const float s1 = sinf(rot312(1));
-	const float c1 = cosf(rot312(1));
-	const float s0 = sinf(rot312(0));
-	const float c0 = cosf(rot312(0));
-
-	Dcmf R;
-	R(0, 0) = c0 * c2 - s0 * s1 * s2;
-	R(1, 1) = c0 * c1;
-	R(2, 2) = c2 * c1;
-	R(0, 1) = -c1 * s0;
-	R(0, 2) = s2 * c0 + c2 * s1 * s0;
-	R(1, 0) = c2 * s0 + s2 * s1 * c0;
-	R(1, 2) = s0 * s2 - s1 * c0 * c2;
-	R(2, 0) = -s2 * c1;
-	R(2, 1) = s1;
-
-	return R;
-}
-
 float EKFGSF_yaw::ahrsCalcAccelGain() const
 {
 	// Calculate the acceleration fusion gain using a continuous function that is unity at 1g and zero
@@ -588,9 +565,8 @@ Matrix3f EKFGSF_yaw::ahrsPredictRotMat(const Matrix3f &R, const Vector3f &g)
 	ret(2,2) += R(2,0) * g(1) - R(2,1) * g(0);
 
 	// Renormalise rows
-	float rowLengthSq;
 	for (uint8_t r = 0; r < 3; r++) {
-		rowLengthSq = ret.row(r).norm_squared();
+		const float rowLengthSq = ret.row(r).norm_squared();
 		if (rowLengthSq > FLT_EPSILON) {
 			// Use linear approximation for inverse sqrt taking advantage of the row length being close to 1.0
 			const float rowLengthInv = 1.5f - 0.5f * rowLengthSq;

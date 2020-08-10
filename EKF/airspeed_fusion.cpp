@@ -46,11 +46,6 @@
 
 void Ekf::fuseAirspeed()
 {
-	float SH_TAS[3] = {}; // Variable used to optimise calculations of measurement jacobian
-	float H_TAS[24] = {}; // Observation Jacobian
-	float SK_TAS[2] = {}; // Variable used to optimise calculations of the Kalman gain vector
-	float Kfusion[24] = {}; // Kalman gain vector
-
 	const float vn = _state.vel(0); // Velocity in north direction
 	const float ve = _state.vel(1); // Velocity in east direction
 	const float vd = _state.vel(2); // Velocity in downwards direction
@@ -69,88 +64,82 @@ void Ekf::fuseAirspeed()
 		// determine if we need the sideslip fusion to correct states other than wind
 		const bool update_wind_only = !_is_wind_dead_reckoning;
 
-		// Calculate the observation jacobian
 		// intermediate variable from algebraic optimisation
+		float SH_TAS[3];
 		SH_TAS[0] = 1.0f/v_tas_pred;
 		SH_TAS[1] = (SH_TAS[0]*(2.0f*ve - 2.0f*vwe))*0.5f;
 		SH_TAS[2] = (SH_TAS[0]*(2.0f*vn - 2.0f*vwn))*0.5f;
 
-		for (uint8_t i = 0; i < _k_num_states; i++) { H_TAS[i] = 0.0f; }
+		// Observation Jacobian
+		Vector24f H_TAS;
+		H_TAS(4) = SH_TAS[2];
+		H_TAS(5) = SH_TAS[1];
+		H_TAS(6) = vd*SH_TAS[0];
+		H_TAS(22) = -SH_TAS[2];
+		H_TAS(23) = -SH_TAS[1];
 
-		H_TAS[4] = SH_TAS[2];
-		H_TAS[5] = SH_TAS[1];
-		H_TAS[6] = vd*SH_TAS[0];
-		H_TAS[22] = -SH_TAS[2];
-		H_TAS[23] = -SH_TAS[1];
+		_airspeed_innov_var = (R_TAS + SH_TAS[2]*(P(4,4)*SH_TAS[2] + P(5,4)*SH_TAS[1] - P(22,4)*SH_TAS[2] - P(23,4)*SH_TAS[1] + P(6,4)*vd*SH_TAS[0]) + SH_TAS[1]*(P(4,5)*SH_TAS[2] + P(5,5)*SH_TAS[1] - P(22,5)*SH_TAS[2] - P(23,5)*SH_TAS[1] + P(6,5)*vd*SH_TAS[0]) - SH_TAS[2]*(P(4,22)*SH_TAS[2] + P(5,22)*SH_TAS[1] - P(22,22)*SH_TAS[2] - P(23,22)*SH_TAS[1] + P(6,22)*vd*SH_TAS[0]) - SH_TAS[1]*(P(4,23)*SH_TAS[2] + P(5,23)*SH_TAS[1] - P(22,23)*SH_TAS[2] - P(23,23)*SH_TAS[1] + P(6,23)*vd*SH_TAS[0]) + vd*SH_TAS[0]*(P(4,6)*SH_TAS[2] + P(5,6)*SH_TAS[1] - P(22,6)*SH_TAS[2] - P(23,6)*SH_TAS[1] + P(6,6)*vd*SH_TAS[0]));
 
-		// We don't want to update the innovation variance if the calculation is ill conditioned
-		const float _airspeed_innov_var_temp = (R_TAS + SH_TAS[2]*(P(4,4)*SH_TAS[2] + P(5,4)*SH_TAS[1] - P(22,4)*SH_TAS[2] - P(23,4)*SH_TAS[1] + P(6,4)*vd*SH_TAS[0]) + SH_TAS[1]*(P(4,5)*SH_TAS[2] + P(5,5)*SH_TAS[1] - P(22,5)*SH_TAS[2] - P(23,5)*SH_TAS[1] + P(6,5)*vd*SH_TAS[0]) - SH_TAS[2]*(P(4,22)*SH_TAS[2] + P(5,22)*SH_TAS[1] - P(22,22)*SH_TAS[2] - P(23,22)*SH_TAS[1] + P(6,22)*vd*SH_TAS[0]) - SH_TAS[1]*(P(4,23)*SH_TAS[2] + P(5,23)*SH_TAS[1] - P(22,23)*SH_TAS[2] - P(23,23)*SH_TAS[1] + P(6,23)*vd*SH_TAS[0]) + vd*SH_TAS[0]*(P(4,6)*SH_TAS[2] + P(5,6)*SH_TAS[1] - P(22,6)*SH_TAS[2] - P(23,6)*SH_TAS[1] + P(6,6)*vd*SH_TAS[0]));
-
-		if (_airspeed_innov_var_temp >= R_TAS) { // Check for badly conditioned calculation
-			SK_TAS[0] = 1.0f / _airspeed_innov_var_temp;
+		if (_airspeed_innov_var >= R_TAS) { // Check for badly conditioned calculation
 			_fault_status.flags.bad_airspeed = false;
 
 		} else { // Reset the estimator covariance matrix
 			_fault_status.flags.bad_airspeed = true;
 
 			// if we are getting aiding from other sources, warn and reset the wind states and covariances only
+			const char* action_string = nullptr;
 			if (update_wind_only) {
 				resetWindStates();
 				resetWindCovariance();
-				ECL_ERR_TIMESTAMPED("airspeed fusion badly conditioned - wind covariance reset");
+				action_string = "wind";
 
 			} else {
 				initialiseCovariance();
 				_state.wind_vel.setZero();
-				ECL_ERR_TIMESTAMPED("airspeed fusion badly conditioned - full covariance reset");
+				action_string = "full";
 			}
+			ECL_ERR("airspeed badly conditioned - %s covariance reset", action_string);
 
 			return;
 		}
 
+		// Variable used to optimise calculations of the Kalman gain
+		float SK_TAS[2];
+		SK_TAS[0] = 1.0f / _airspeed_innov_var;
 		SK_TAS[1] = SH_TAS[1];
 
-		if (update_wind_only) {
-			// If we are getting aiding from other sources, then don't allow the airspeed measurements to affect the non-windspeed states
-			for (unsigned row = 0; row <= 21; row++) {
-				Kfusion[row] = 0.0f;
-			}
-
-		} else {
+		Vector24f Kfusion; // Kalman gain
+		if (!update_wind_only) {
 			// we have no other source of aiding, so use airspeed measurements to correct states
-			Kfusion[0] = SK_TAS[0]*(P(0,4)*SH_TAS[2] - P(0,22)*SH_TAS[2] + P(0,5)*SK_TAS[1] - P(0,23)*SK_TAS[1] + P(0,6)*vd*SH_TAS[0]);
-			Kfusion[1] = SK_TAS[0]*(P(1,4)*SH_TAS[2] - P(1,22)*SH_TAS[2] + P(1,5)*SK_TAS[1] - P(1,23)*SK_TAS[1] + P(1,6)*vd*SH_TAS[0]);
-			Kfusion[2] = SK_TAS[0]*(P(2,4)*SH_TAS[2] - P(2,22)*SH_TAS[2] + P(2,5)*SK_TAS[1] - P(2,23)*SK_TAS[1] + P(2,6)*vd*SH_TAS[0]);
-			Kfusion[3] = SK_TAS[0]*(P(3,4)*SH_TAS[2] - P(3,22)*SH_TAS[2] + P(3,5)*SK_TAS[1] - P(3,23)*SK_TAS[1] + P(3,6)*vd*SH_TAS[0]);
-			Kfusion[4] = SK_TAS[0]*(P(4,4)*SH_TAS[2] - P(4,22)*SH_TAS[2] + P(4,5)*SK_TAS[1] - P(4,23)*SK_TAS[1] + P(4,6)*vd*SH_TAS[0]);
-			Kfusion[5] = SK_TAS[0]*(P(5,4)*SH_TAS[2] - P(5,22)*SH_TAS[2] + P(5,5)*SK_TAS[1] - P(5,23)*SK_TAS[1] + P(5,6)*vd*SH_TAS[0]);
-			Kfusion[6] = SK_TAS[0]*(P(6,4)*SH_TAS[2] - P(6,22)*SH_TAS[2] + P(6,5)*SK_TAS[1] - P(6,23)*SK_TAS[1] + P(6,6)*vd*SH_TAS[0]);
-			Kfusion[7] = SK_TAS[0]*(P(7,4)*SH_TAS[2] - P(7,22)*SH_TAS[2] + P(7,5)*SK_TAS[1] - P(7,23)*SK_TAS[1] + P(7,6)*vd*SH_TAS[0]);
-			Kfusion[8] = SK_TAS[0]*(P(8,4)*SH_TAS[2] - P(8,22)*SH_TAS[2] + P(8,5)*SK_TAS[1] - P(8,23)*SK_TAS[1] + P(8,6)*vd*SH_TAS[0]);
-			Kfusion[9] = SK_TAS[0]*(P(9,4)*SH_TAS[2] - P(9,22)*SH_TAS[2] + P(9,5)*SK_TAS[1] - P(9,23)*SK_TAS[1] + P(9,6)*vd*SH_TAS[0]);
-			Kfusion[10] = SK_TAS[0]*(P(10,4)*SH_TAS[2] - P(10,22)*SH_TAS[2] + P(10,5)*SK_TAS[1] - P(10,23)*SK_TAS[1] + P(10,6)*vd*SH_TAS[0]);
-			Kfusion[11] = SK_TAS[0]*(P(11,4)*SH_TAS[2] - P(11,22)*SH_TAS[2] + P(11,5)*SK_TAS[1] - P(11,23)*SK_TAS[1] + P(11,6)*vd*SH_TAS[0]);
-			Kfusion[12] = SK_TAS[0]*(P(12,4)*SH_TAS[2] - P(12,22)*SH_TAS[2] + P(12,5)*SK_TAS[1] - P(12,23)*SK_TAS[1] + P(12,6)*vd*SH_TAS[0]);
-			Kfusion[13] = SK_TAS[0]*(P(13,4)*SH_TAS[2] - P(13,22)*SH_TAS[2] + P(13,5)*SK_TAS[1] - P(13,23)*SK_TAS[1] + P(13,6)*vd*SH_TAS[0]);
-			Kfusion[14] = SK_TAS[0]*(P(14,4)*SH_TAS[2] - P(14,22)*SH_TAS[2] + P(14,5)*SK_TAS[1] - P(14,23)*SK_TAS[1] + P(14,6)*vd*SH_TAS[0]);
-			Kfusion[15] = SK_TAS[0]*(P(15,4)*SH_TAS[2] - P(15,22)*SH_TAS[2] + P(15,5)*SK_TAS[1] - P(15,23)*SK_TAS[1] + P(15,6)*vd*SH_TAS[0]);
-			Kfusion[16] = SK_TAS[0]*(P(16,4)*SH_TAS[2] - P(16,22)*SH_TAS[2] + P(16,5)*SK_TAS[1] - P(16,23)*SK_TAS[1] + P(16,6)*vd*SH_TAS[0]);
-			Kfusion[17] = SK_TAS[0]*(P(17,4)*SH_TAS[2] - P(17,22)*SH_TAS[2] + P(17,5)*SK_TAS[1] - P(17,23)*SK_TAS[1] + P(17,6)*vd*SH_TAS[0]);
-			Kfusion[18] = SK_TAS[0]*(P(18,4)*SH_TAS[2] - P(18,22)*SH_TAS[2] + P(18,5)*SK_TAS[1] - P(18,23)*SK_TAS[1] + P(18,6)*vd*SH_TAS[0]);
-			Kfusion[19] = SK_TAS[0]*(P(19,4)*SH_TAS[2] - P(19,22)*SH_TAS[2] + P(19,5)*SK_TAS[1] - P(19,23)*SK_TAS[1] + P(19,6)*vd*SH_TAS[0]);
-			Kfusion[20] = SK_TAS[0]*(P(20,4)*SH_TAS[2] - P(20,22)*SH_TAS[2] + P(20,5)*SK_TAS[1] - P(20,23)*SK_TAS[1] + P(20,6)*vd*SH_TAS[0]);
-			Kfusion[21] = SK_TAS[0]*(P(21,4)*SH_TAS[2] - P(21,22)*SH_TAS[2] + P(21,5)*SK_TAS[1] - P(21,23)*SK_TAS[1] + P(21,6)*vd*SH_TAS[0]);
+			Kfusion(0) = SK_TAS[0]*(P(0,4)*SH_TAS[2] - P(0,22)*SH_TAS[2] + P(0,5)*SK_TAS[1] - P(0,23)*SK_TAS[1] + P(0,6)*vd*SH_TAS[0]);
+			Kfusion(1) = SK_TAS[0]*(P(1,4)*SH_TAS[2] - P(1,22)*SH_TAS[2] + P(1,5)*SK_TAS[1] - P(1,23)*SK_TAS[1] + P(1,6)*vd*SH_TAS[0]);
+			Kfusion(2) = SK_TAS[0]*(P(2,4)*SH_TAS[2] - P(2,22)*SH_TAS[2] + P(2,5)*SK_TAS[1] - P(2,23)*SK_TAS[1] + P(2,6)*vd*SH_TAS[0]);
+			Kfusion(3) = SK_TAS[0]*(P(3,4)*SH_TAS[2] - P(3,22)*SH_TAS[2] + P(3,5)*SK_TAS[1] - P(3,23)*SK_TAS[1] + P(3,6)*vd*SH_TAS[0]);
+			Kfusion(4) = SK_TAS[0]*(P(4,4)*SH_TAS[2] - P(4,22)*SH_TAS[2] + P(4,5)*SK_TAS[1] - P(4,23)*SK_TAS[1] + P(4,6)*vd*SH_TAS[0]);
+			Kfusion(5) = SK_TAS[0]*(P(5,4)*SH_TAS[2] - P(5,22)*SH_TAS[2] + P(5,5)*SK_TAS[1] - P(5,23)*SK_TAS[1] + P(5,6)*vd*SH_TAS[0]);
+			Kfusion(6) = SK_TAS[0]*(P(6,4)*SH_TAS[2] - P(6,22)*SH_TAS[2] + P(6,5)*SK_TAS[1] - P(6,23)*SK_TAS[1] + P(6,6)*vd*SH_TAS[0]);
+			Kfusion(7) = SK_TAS[0]*(P(7,4)*SH_TAS[2] - P(7,22)*SH_TAS[2] + P(7,5)*SK_TAS[1] - P(7,23)*SK_TAS[1] + P(7,6)*vd*SH_TAS[0]);
+			Kfusion(8) = SK_TAS[0]*(P(8,4)*SH_TAS[2] - P(8,22)*SH_TAS[2] + P(8,5)*SK_TAS[1] - P(8,23)*SK_TAS[1] + P(8,6)*vd*SH_TAS[0]);
+			Kfusion(9) = SK_TAS[0]*(P(9,4)*SH_TAS[2] - P(9,22)*SH_TAS[2] + P(9,5)*SK_TAS[1] - P(9,23)*SK_TAS[1] + P(9,6)*vd*SH_TAS[0]);
+			Kfusion(10) = SK_TAS[0]*(P(10,4)*SH_TAS[2] - P(10,22)*SH_TAS[2] + P(10,5)*SK_TAS[1] - P(10,23)*SK_TAS[1] + P(10,6)*vd*SH_TAS[0]);
+			Kfusion(11) = SK_TAS[0]*(P(11,4)*SH_TAS[2] - P(11,22)*SH_TAS[2] + P(11,5)*SK_TAS[1] - P(11,23)*SK_TAS[1] + P(11,6)*vd*SH_TAS[0]);
+			Kfusion(12) = SK_TAS[0]*(P(12,4)*SH_TAS[2] - P(12,22)*SH_TAS[2] + P(12,5)*SK_TAS[1] - P(12,23)*SK_TAS[1] + P(12,6)*vd*SH_TAS[0]);
+			Kfusion(13) = SK_TAS[0]*(P(13,4)*SH_TAS[2] - P(13,22)*SH_TAS[2] + P(13,5)*SK_TAS[1] - P(13,23)*SK_TAS[1] + P(13,6)*vd*SH_TAS[0]);
+			Kfusion(14) = SK_TAS[0]*(P(14,4)*SH_TAS[2] - P(14,22)*SH_TAS[2] + P(14,5)*SK_TAS[1] - P(14,23)*SK_TAS[1] + P(14,6)*vd*SH_TAS[0]);
+			Kfusion(15) = SK_TAS[0]*(P(15,4)*SH_TAS[2] - P(15,22)*SH_TAS[2] + P(15,5)*SK_TAS[1] - P(15,23)*SK_TAS[1] + P(15,6)*vd*SH_TAS[0]);
+			Kfusion(16) = SK_TAS[0]*(P(16,4)*SH_TAS[2] - P(16,22)*SH_TAS[2] + P(16,5)*SK_TAS[1] - P(16,23)*SK_TAS[1] + P(16,6)*vd*SH_TAS[0]);
+			Kfusion(17) = SK_TAS[0]*(P(17,4)*SH_TAS[2] - P(17,22)*SH_TAS[2] + P(17,5)*SK_TAS[1] - P(17,23)*SK_TAS[1] + P(17,6)*vd*SH_TAS[0]);
+			Kfusion(18) = SK_TAS[0]*(P(18,4)*SH_TAS[2] - P(18,22)*SH_TAS[2] + P(18,5)*SK_TAS[1] - P(18,23)*SK_TAS[1] + P(18,6)*vd*SH_TAS[0]);
+			Kfusion(19) = SK_TAS[0]*(P(19,4)*SH_TAS[2] - P(19,22)*SH_TAS[2] + P(19,5)*SK_TAS[1] - P(19,23)*SK_TAS[1] + P(19,6)*vd*SH_TAS[0]);
+			Kfusion(20) = SK_TAS[0]*(P(20,4)*SH_TAS[2] - P(20,22)*SH_TAS[2] + P(20,5)*SK_TAS[1] - P(20,23)*SK_TAS[1] + P(20,6)*vd*SH_TAS[0]);
+			Kfusion(21) = SK_TAS[0]*(P(21,4)*SH_TAS[2] - P(21,22)*SH_TAS[2] + P(21,5)*SK_TAS[1] - P(21,23)*SK_TAS[1] + P(21,6)*vd*SH_TAS[0]);
 		}
-		Kfusion[22] = SK_TAS[0]*(P(22,4)*SH_TAS[2] - P(22,22)*SH_TAS[2] + P(22,5)*SK_TAS[1] - P(22,23)*SK_TAS[1] + P(22,6)*vd*SH_TAS[0]);
-		Kfusion[23] = SK_TAS[0]*(P(23,4)*SH_TAS[2] - P(23,22)*SH_TAS[2] + P(23,5)*SK_TAS[1] - P(23,23)*SK_TAS[1] + P(23,6)*vd*SH_TAS[0]);
-
+		Kfusion(22) = SK_TAS[0]*(P(22,4)*SH_TAS[2] - P(22,22)*SH_TAS[2] + P(22,5)*SK_TAS[1] - P(22,23)*SK_TAS[1] + P(22,6)*vd*SH_TAS[0]);
+		Kfusion(23) = SK_TAS[0]*(P(23,4)*SH_TAS[2] - P(23,22)*SH_TAS[2] + P(23,5)*SK_TAS[1] - P(23,23)*SK_TAS[1] + P(23,6)*vd*SH_TAS[0]);
 
 		// Calculate measurement innovation
 		_airspeed_innov = v_tas_pred -
 				  _airspeed_sample_delayed.true_airspeed;
-
-		// Calculate the innovation variance
-		_airspeed_innov_var = 1.0f / SK_TAS[0];
 
 		// Compute the ratio of innovation to gate size
 		_tas_test_ratio = sq(_airspeed_innov) / (sq(fmaxf(_params.tas_innov_gate, 1.0f)) * _airspeed_innov_var);
@@ -164,22 +153,19 @@ void Ekf::fuseAirspeed()
 			_innov_check_fail_status.flags.reject_airspeed = false;
 		}
 
-		// Airspeed measurement sample has passed check so record it
-		_time_last_arsp_fuse = _time_last_imu;
-
 		// apply covariance correction via P_new = (I -K*H)*P
 		// first calculate expression for KHP
 		// then calculate P - KHP
-		matrix::SquareMatrix<float, _k_num_states> KHP;
+		SquareMatrix24f KHP;
 		float KH[5];
 
 		for (unsigned row = 0; row < _k_num_states; row++) {
 
-			KH[0] = Kfusion[row] * H_TAS[4];
-			KH[1] = Kfusion[row] * H_TAS[5];
-			KH[2] = Kfusion[row] * H_TAS[6];
-			KH[3] = Kfusion[row] * H_TAS[22];
-			KH[4] = Kfusion[row] * H_TAS[23];
+			KH[0] = Kfusion(row) * H_TAS(4);
+			KH[1] = Kfusion(row) * H_TAS(5);
+			KH[2] = Kfusion(row) * H_TAS(6);
+			KH[3] = Kfusion(row) * H_TAS(22);
+			KH[4] = Kfusion(row) * H_TAS(23);
 
 			for (unsigned column = 0; column < _k_num_states; column++) {
 				float tmp = KH[0] * P(4,column);
@@ -191,36 +177,20 @@ void Ekf::fuseAirspeed()
 			}
 		}
 
-		// if the covariance correction will result in a negative variance, then
-		// the covariance matrix is unhealthy and must be corrected
-		bool healthy = true;
-		_fault_status.flags.bad_airspeed = false;
+		const bool healthy = checkAndFixCovarianceUpdate(KHP);
 
-		for (int i = 0; i < _k_num_states; i++) {
-			if (P(i,i) < KHP(i,i)) {
-				// zero rows and columns
-				P.uncorrelateCovarianceSetVariance<1>(i, 0.0f);
+		_fault_status.flags.bad_airspeed = !healthy;
 
-				//flag as unhealthy
-				healthy = false;
-
-				// update individual measurement health status
-				_fault_status.flags.bad_airspeed = true;
-
-			}
-		}
-
-		// only apply covariance and state corrections if healthy
 		if (healthy) {
 			// apply the covariance corrections
-			P = P - KHP;
+			P -= KHP;
 
-			// correct the covariance matrix for gross errors
 			fixCovarianceErrors(true);
 
 			// apply the state corrections
 			fuse(Kfusion, _airspeed_innov);
 
+			_time_last_arsp_fuse = _time_last_imu;
 		}
 	}
 }

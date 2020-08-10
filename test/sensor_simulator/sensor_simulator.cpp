@@ -106,7 +106,7 @@ void SensorSimulator::loadSensorDataFromFile(std::string file_name)
 
 void SensorSimulator::setSensorRateToDefault()
 {
-	_imu.setRateHz(250);
+	_imu.setRateHz(200);
 	_mag.setRateHz(80);
 	_baro.setRateHz(80);
 	_gps.setRateHz(5);
@@ -146,9 +146,13 @@ void SensorSimulator::runMicroseconds(uint32_t duration)
 
 	for(;_time < start_time + (uint64_t)duration; _time+=1000)
 	{
+		bool update_imu = _imu.should_send(_time);
 		updateSensors();
 
-		_ekf->update();
+		if (update_imu) {
+			// Update at IMU rate
+			_ekf->update();
+		}
 	}
 }
 

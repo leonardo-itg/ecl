@@ -226,6 +226,8 @@ public:
 
 	bool isTerrainEstimateValid() const override;
 
+	uint8_t getTerrainEstimateSensorBitfield() const override {return _hagl_sensor_status.value;}
+
 	void updateTerrainValidity();
 
 	// get the estimated terrain vertical position relative to the NED origin
@@ -300,9 +302,6 @@ public:
 	void requestEmergencyNavReset() override;
 
 private:
-
-	static constexpr uint8_t _k_num_states{24};		///< number of EKF states
-
 	struct {
 		uint8_t velNE_counter;	///< number of horizontal position reset events (allow to wrap if count exceeds 255)
 		uint8_t velD_counter;	///< number of vertical velocity reset events (allow to wrap if count exceeds 255)
@@ -340,6 +339,7 @@ private:
 	bool _tas_data_ready{false};	///< true when new true airspeed data has fallen behind the fusion time horizon and is available to be fused
 	bool _flow_for_terrain_data_ready{false}; /// same flag as "_flow_data_ready" but used for separate terrain estimator
 
+	uint64_t _time_prev_gps_us{0};	///< time stamp of previous GPS data retrieved from the buffer (uSec)
 	uint64_t _time_last_aiding{0};	///< amount of time we have been doing inertial only deadreckoning (uSec)
 	bool _using_synthetic_position{false};	///< true if we are using a synthetic position to constrain drift
 
@@ -351,8 +351,9 @@ private:
 	uint64_t _time_last_of_fuse{0};		///< time the last fusion of optical flow measurements were performed (uSec)
 	uint64_t _time_last_arsp_fuse{0};	///< time the last fusion of airspeed measurements were performed (uSec)
 	uint64_t _time_last_beta_fuse{0};	///< time the last fusion of synthetic sideslip measurements were performed (uSec)
-	uint64_t _time_last_mag{0};		///< measurement time of last magnetomter sample (uSec)
 	uint64_t _time_last_fake_pos{0};	///< last time we faked position measurements to constrain tilt errors during operation without external aiding (uSec)
+
+	uint64_t _time_last_gps_yaw_fuse{0};	///< time the last fusion of GPS yaw measurements were performed (uSec)
 
 	Vector2f _last_known_posNE;		///< last known local NE position vector (m)
 	float _imu_collection_time_adj{0.0f};	///< the amount of time the IMU collection needs to be advanced to meet the target set by FILTER_UPDATE_PERIOD_MS (sec)
@@ -381,9 +382,9 @@ private:
 	bool _mag_decl_cov_reset{false};	///< true after the fuseDeclination() function has been used to modify the earth field covariances after a magnetic field reset event.
 	bool _synthetic_mag_z_active{false};	///< true if we are generating synthetic magnetometer Z measurements
 
-	bool _yaw_use_inhibit{false};		///< true when yaw sensor use is being inhibited
+	bool _is_yaw_fusion_inhibited{false};		///< true when yaw sensor use is being inhibited
 
-	matrix::SquareMatrix<float, _k_num_states> P;	///< state covariance matrix
+	SquareMatrix24f P;	///< state covariance matrix
 
 	Vector3f _delta_vel_bias_var_accum;		///< kahan summation algorithm accumulator for delta velocity bias variance
 	Vector3f _delta_angle_bias_var_accum;	///< kahan summation algorithm accumulator for delta angle bias variance
@@ -413,11 +414,11 @@ private:
 	float _heading_innov{0.0f};	///< heading measurement innovation (rad)
 	float _heading_innov_var{0.0f};	///< heading measurement innovation variance (rad**2)
 
-	float _mag_innov[3] {};		///< earth magnetic field innovations (Gauss)
-	float _mag_innov_var[3] {};	///< earth magnetic field innovation variance (Gauss**2)
+	Vector3f _mag_innov;		///< earth magnetic field innovations (Gauss)
+	Vector3f _mag_innov_var;	///< earth magnetic field innovation variance (Gauss**2)
 
-	float _drag_innov[2] {};	///< multirotor drag measurement innovation (m/sec**2)
-	float _drag_innov_var[2] {};	///< multirotor drag measurement innovation variance ((m/sec**2)**2)
+	Vector2f _drag_innov;		///< multirotor drag measurement innovation (m/sec**2)
+	Vector2f _drag_innov_var;	///< multirotor drag measurement innovation variance ((m/sec**2)**2)
 
 	float _airspeed_innov{0.0f};		///< airspeed measurement innovation (m/sec)
 	float _airspeed_innov_var{0.0f};	///< airspeed measurement innovation variance ((m/sec)**2)
@@ -429,8 +430,8 @@ private:
 	float _hagl_innov_var{0.0f};		///< innovation variance for the last height above terrain measurement (m**2)
 
 	// optical flow processing
-	float _flow_innov[2] {};	///< flow measurement innovation (rad/sec)
-	float _flow_innov_var[2] {};	///< flow innovation variance ((rad/sec)**2)
+	Vector2f _flow_innov;		///< flow measurement innovation (rad/sec)
+	Vector2f _flow_innov_var;	///< flow innovation variance ((rad/sec)**2)
 	Vector3f _flow_gyro_bias;	///< bias errors in optical flow sensor rate gyro outputs (rad/sec)
 	Vector3f _imu_del_ang_of;	///< bias corrected delta angle measurements accumulated across the same time frame as the optical flow rates (rad)
 	float _delta_time_of{0.0f};	///< time in sec that _imu_del_ang_of was accumulated over (sec)
@@ -476,13 +477,13 @@ private:
 	uint64_t _flt_mag_align_start_time{0};	///< time that inflight magnetic field alignment started (uSec)
 	uint64_t _time_last_mov_3d_mag_suitable{0};	///< last system time that sufficient movement to use 3-axis magnetometer fusion was detected (uSec)
 	float _saved_mag_bf_variance[4] {};	///< magnetic field state variances that have been saved for use at the next initialisation (Gauss**2)
-	float _saved_mag_ef_covmat[2][2] {};    ///< NE magnetic field state covariance sub-matrix saved for use at the next initialisation (Gauss**2)
+	Matrix2f _saved_mag_ef_covmat;		///< NE magnetic field state covariance sub-matrix saved for use at the next initialisation (Gauss**2)
 	bool _velpos_reset_request{false};	///< true when a large yaw error has been fixed and a velocity and position state reset is required
 
 	gps_check_fail_status_u _gps_check_fail_status{};
 
 	// variables used to inhibit accel bias learning
-	bool _accel_bias_inhibit{false};	///< true when the accel bias learning is being inhibited
+	bool _accel_bias_inhibit[3]{};		///< true when the accel bias learning is being inhibited for the specified axis
 	Vector3f _accel_vec_filt;		///< acceleration vector after application of a low pass filter (m/sec**2)
 	float _accel_magnitude_filt{0.0f};	///< acceleration magnitude after application of a decaying envelope filter (rad/sec)
 	float _ang_rate_magnitude_filt{0.0f};		///< angular rate magnitude after application of a decaying envelope filter (rad/sec)
@@ -491,13 +492,16 @@ private:
 	// Terrain height state estimation
 	float _terrain_vpos{0.0f};		///< estimated vertical position of the terrain underneath the vehicle in local NED frame (m)
 	float _terrain_var{1e4f};		///< variance of terrain position estimate (m**2)
-	uint64_t _time_last_hagl_fuse{0};		///< last system time that the hagl measurement failed it's checks (uSec)
+	uint64_t _time_last_hagl_fuse{0};		///< last system time that a range sample was fused by the terrain estimator
+	uint64_t _time_last_fake_hagl_fuse{0};	///< last system time that a fake range sample was fused by the terrain estimator
 	bool _terrain_initialised{false};	///< true when the terrain estimator has been initialized
 	bool _hagl_valid{false};		///< true when the height above ground estimate is valid
+	terrain_fusion_status_u _hagl_sensor_status{}; ///< Struct indicating type of sensor used to estimate height above ground
 
 	// height sensor status
 	bool _baro_hgt_faulty{false};		///< true if valid baro data is unavailable for use
 	bool _gps_hgt_intermittent{false};	///< true if gps height into the buffer is intermittent
+	bool _is_gps_yaw_faulty{false};		///< true if gps yaw data is rejected by the filter for too long
 
 	// imu fault status
 	uint64_t _time_bad_vert_accel{0};	///< last time a bad vertical accel was detected (uSec)
@@ -512,6 +516,8 @@ private:
 	// update the real time complementary filter states. This includes the prediction
 	// and the correction step
 	void calculateOutputStates();
+	void applyCorrectionToVerticalOutputBuffer(float vel_gain, float pos_gain);
+	void applyCorrectionToOutputBuffer(float vel_gain, float pos_gain);
 
 	// initialise filter states of both the delayed ekf and the real time complementary filter
 	bool initialiseFilter(void);
@@ -551,11 +557,11 @@ private:
 	void updateQuaternion(const float innovation, const float variance, const float gate_sigma, const Vector4f& yaw_jacobian);
 
 	// fuse the yaw angle obtained from a dual antenna GPS unit
-	void fuseGpsAntYaw();
+	void fuseGpsYaw();
 
 	// reset the quaternions states using the yaw angle obtained from a dual antenna GPS unit
 	// return true if the reset was successful
-	bool resetGpsAntYaw();
+	bool resetYawToGps();
 
 	// fuse magnetometer declination measurement
 	// argument passed in is the declination uncertainty in radians
@@ -576,16 +582,31 @@ private:
 	// fuse single velocity and position measurement
 	void fuseVelPosHeight(const float innov, const float innov_var, const int obs_index);
 
-	// reset velocity states of the ekf
-	bool resetVelocity();
+	void resetVelocity();
 
-	void resetVelocityTo(const Vector3f &vel);
+	void resetVelocityToGps();
+
+	inline void resetHorizontalVelocityToOpticalFlow();
+
+	inline void resetVelocityToVision();
+
+	inline void resetHorizontalVelocityToZero();
+
+	inline void resetVelocityTo(const Vector3f &vel);
 
 	inline void resetHorizontalVelocityTo(const Vector2f &new_horz_vel);
 
 	inline void resetVerticalVelocityTo(float new_vert_vel);
 
+	void resetHorizontalPosition();
+
+	void resetHorizontalPositionToGps();
+
+	inline void resetHorizontalPositionToVision();
+
 	inline void resetHorizontalPositionTo(const Vector2f &new_horz_pos);
+
+	void resetHeight();
 
 	// fuse optical flow line of sight rate measurements
 	void fuseOptFlow();
@@ -610,6 +631,9 @@ private:
 	// return true if the initialisation is successful
 	bool initHagl();
 
+	bool shouldUseRangeFinderForHagl() const;
+	bool shouldUseOpticalFlowForHagl() const;
+
 	// run the terrain estimator
 	void runTerrainEstimator();
 
@@ -630,17 +654,19 @@ private:
 	// Return the magnetic declination in radians to be used by the alignment and fusion processing
 	float getMagDeclination();
 
-	// reset position states of the ekf (only horizontal position)
-	bool resetPosition();
-
-	// reset height state of the ekf
-	void resetHeight();
-
 	// modify output filter to match the the EKF state at the fusion time horizon
 	void alignOutputFilter();
 
 	// update the rotation matrix which transforms EV navigation frame measurements into NED
 	void calcExtVisRotMat();
+
+	Vector3f getVisionVelocityInEkfFrame() const;
+
+	Vector3f getVisionVelocityVarianceInEkfFrame() const;
+
+	// if the covariance correction will result in a negative variance, then
+	// the covariance matrix is unhealthy and must be corrected
+	bool checkAndFixCovarianceUpdate(const SquareMatrix24f& KHP);
 
 	// limit the diagonal of the covariance matrix
 	// force symmetry when the argument is true
@@ -651,7 +677,7 @@ private:
 
 	// generic function which will perform a fusion step given a kalman gain K
 	// and a scalar innovation value
-	void fuse(float *K, float innovation);
+	void fuse(const Vector24f& K, float innovation);
 
 	float compensateBaroForDynamicPressure(float baro_alt_uncompensated) override;
 
@@ -672,12 +698,13 @@ private:
 
 	// control fusion of GPS observations
 	void controlGpsFusion();
+	void controlGpsYawFusion();
 
 	// control fusion of magnetometer observations
 	void controlMagFusion();
 	void updateMagFilter();
 
-	bool canRunMagFusion() const;
+	bool noOtherYawAidingThanMag() const;
 
 	void checkHaglYawResetReq();
 	float getTerrainVPos() const;
@@ -806,12 +833,6 @@ private:
 	// uncorrelate quaternion states from other states
 	void uncorrelateQuatFromOtherStates();
 
-	// Use Kahan summation algorithm to get the sum of "sum_previous" and "input".
-	// This function relies on the caller to be responsible for keeping a copy of
-	// "accumulator" and passing this value at the next iteration.
-	// Ref: https://en.wikipedia.org/wiki/Kahan_summation_algorithm
-	float kahanSummation(float sum_previous, float input, float &accumulator) const;
-
 	// calculate a synthetic value for the magnetometer Z component, given the 3D magnetomter
 	// sensor measurement
 	float calculate_synthetic_mag_z_measurement(const Vector3f &mag_meas, const Vector3f &mag_earth_predicted);
@@ -832,14 +853,16 @@ private:
 
 	void stopGpsVelFusion();
 
+	void startGpsYawFusion();
 	void stopGpsYawFusion();
 
+	void startEvPosFusion();
+	void startEvVelFusion();
+	void startEvYawFusion();
+
 	void stopEvFusion();
-
 	void stopEvPosFusion();
-
 	void stopEvVelFusion();
-
 	void stopEvYawFusion();
 
 	void stopAuxVelFusion();
@@ -854,19 +877,12 @@ private:
 	// update_buffer : true if the state change should be also applied to the output observer buffer
 	void resetQuatStateYaw(float yaw, float yaw_variance, bool update_buffer);
 
-	// converts Tait-Bryan 312 sequence of rotations from frame 1 to frame 2
-	// to the corresponding rotation matrix that rotates from frame 2 to frame 1
-	// rot312(0) - First rotation is a RH rotation about the Z axis (rad)
-	// rot312(1) - Second rotation is a RH rotation about the X axis (rad)
-	// rot312(2) - Third rotation is a RH rotation about the Y axis (rad)
-	// See http://www.atacolorado.com/eulersequences.doc
-	Dcmf taitBryan312ToRotMat(const Vector3f &rot312);
-
 	// Declarations used to control use of the EKF-GSF yaw estimator
 
 	int64_t _ekfgsf_yaw_reset_time{0};	///< timestamp of last emergency yaw reset (uSec)
 	uint64_t _time_last_on_ground_us{0};	///< last tine we were on the ground (uSec)
 	bool _do_ekfgsf_yaw_reset{false};	// true when an emergency yaw reset has been requested
+	uint8_t _ekfgsf_yaw_reset_count{0};	// number of times the yaw has been reset to the EKF-GSF estimate
 
 	// Call once per _imu_sample_delayed update after all main EKF data fusion oeprations have been completed
 	void runYawEKFGSF();
@@ -876,4 +892,5 @@ private:
 	// Returns true if the reset was successful
 	bool resetYawToEKFGSF();
 
+	void resetGpsDriftCheckFilters();
 };

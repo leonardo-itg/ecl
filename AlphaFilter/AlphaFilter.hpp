@@ -42,6 +42,8 @@
 
 #pragma once
 
+#include <float.h>
+
 template <typename T>
 class AlphaFilter {
 public:
@@ -57,7 +59,11 @@ public:
 	 * @param time_constant filter time constant determining convergence
 	 */
 	void setParameters(float sample_interval, float time_constant) {
-		setAlpha(sample_interval / (time_constant + sample_interval));
+		const float denominator = time_constant + sample_interval;
+
+		if (denominator > FLT_EPSILON) {
+			setAlpha(sample_interval / denominator);
+		}
 	}
 
 	/**

@@ -45,13 +45,17 @@ set(SRCS
 	test_AlphaFilter.cpp
 	test_EKF_fusionLogic.cpp
 	test_EKF_initialization.cpp
+	test_EKF_gps_yaw.cpp
 	test_EKF_gps.cpp
 	test_EKF_externalVision.cpp
 	test_EKF_airspeed.cpp
 	test_EKF_withReplayData.cpp
 	test_EKF_flow.cpp
+	test_EKF_terrain_estimator.cpp
 	test_SensorRangeFinder.cpp
 	test_geo.cpp
+	test_geo_lookup.cpp
+	test_EKF_utils.cpp
    )
 add_executable(ECL_GTESTS ${SRCS})
 

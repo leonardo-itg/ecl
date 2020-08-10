@@ -44,10 +44,11 @@
 #include <ecl.h>
 #include "common.h"
 #include "RingBuffer.h"
-#include "AlphaFilter.hpp"
+#include <AlphaFilter/AlphaFilter.hpp>
 #include "imu_down_sampler.hpp"
 #include "EKFGSF_yaw.h"
 #include "sensor_range_finder.hpp"
+#include "utils.hpp"
 
 #include <geo/geo.h>
 #include <matrix/math.hpp>
@@ -271,6 +272,8 @@ public:
 	//[[deprecated("Replaced by isTerrainEstimateValid")]]
 	bool get_terrain_valid() { return isTerrainEstimateValid(); }
 
+	virtual uint8_t getTerrainEstimateSensorBitfield() const = 0;
+
 	// get the estimated terrain vertical position relative to the NED origin
 	virtual float getTerrainVertPos() const = 0;
 
@@ -476,19 +479,19 @@ protected:
 
 	// innovation consistency check monitoring ratios
 	float _yaw_test_ratio{};		// yaw innovation consistency check ratio
-	float _mag_test_ratio[3] {};		// magnetometer XYZ innovation consistency check ratios
-	Vector2f _gps_vel_test_ratio;	// GPS velocity innovation consistency check ratios
-	Vector2f _gps_pos_test_ratio;	// GPS position innovation consistency check ratios
+	Vector3f _mag_test_ratio;		// magnetometer XYZ innovation consistency check ratios
+	Vector2f _gps_vel_test_ratio;		// GPS velocity innovation consistency check ratios
+	Vector2f _gps_pos_test_ratio;		// GPS position innovation consistency check ratios
 	Vector2f _ev_vel_test_ratio;		// EV velocity innovation consistency check ratios
 	Vector2f _ev_pos_test_ratio ;		// EV position innovation consistency check ratios
 	Vector2f _aux_vel_test_ratio;		// Auxiliray horizontal velocity innovation consistency check ratio
-	Vector2f _baro_hgt_test_ratio;	// baro height innovation consistency check ratios
-	Vector2f _rng_hgt_test_ratio;	// range finder height innovation consistency check ratios
+	Vector2f _baro_hgt_test_ratio;		// baro height innovation consistency check ratios
+	Vector2f _rng_hgt_test_ratio;		// range finder height innovation consistency check ratios
 	float _optflow_test_ratio{};		// Optical flow innovation consistency check ratio
 	float _tas_test_ratio{};		// tas innovation consistency check ratio
 	float _hagl_test_ratio{};		// height above terrain measurement innovation consistency check ratio
 	float _beta_test_ratio{};		// sideslip innovation consistency check ratio
-	float _drag_test_ratio[2] {};	// drag innovation consistency check ratio
+	Vector2f _drag_test_ratio;		// drag innovation consistency check ratio
 	innovation_fault_status_u _innov_check_fail_status{};
 
 	bool _is_dead_reckoning{false};		// true if we are no longer fusing measurements that constrain horizontal velocity drift
@@ -540,7 +543,7 @@ protected:
 	// timestamps of latest in buffer saved measurement in microseconds
 	uint64_t _time_last_imu{0};
 	uint64_t _time_last_gps{0};
-	uint64_t _time_last_mag{0};
+	uint64_t _time_last_mag{0}; ///< measurement time of last magnetomter sample (uSec)
 	uint64_t _time_last_baro{0};
 	uint64_t _time_last_range{0};
 	uint64_t _time_last_airspeed{0};
@@ -577,9 +580,6 @@ protected:
 
 	// this is the previous status of the filter control modes - used to detect mode transitions
 	filter_control_status_u _control_status_prev{};
-
-	// calculate the inverse rotation matrix from a quaternion rotation
-	Matrix3f quat_to_invrotmat(const Quatf &quat);
 
 	inline void setDragData();
 

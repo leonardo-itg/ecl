@@ -47,16 +47,18 @@ message(STATUS "build type is ${CMAKE_BUILD_TYPE}")
 
 set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug;Release;RelWithDebInfo;MinSizeRel;Coverage")
 
-execute_process(
-	COMMAND git describe --always --tags
-	OUTPUT_VARIABLE git_tag
-	OUTPUT_STRIP_TRAILING_WHITESPACE
-	WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-	)
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/.git)
+	execute_process(
+		COMMAND git describe --always --tags
+		OUTPUT_VARIABLE git_tag
+		OUTPUT_STRIP_TRAILING_WHITESPACE
+		WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+		)
+endif()
 
 message(STATUS "PX4 ECL: Very lightweight Estimation & Control Library ${git_tag}")
 
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -132,7 +134,7 @@ if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
 	include(ExternalProject)
 	ExternalProject_Add(matrix
 			GIT_REPOSITORY "https://github.com/PX4/Matrix.git"
-			GIT_TAG d613055462bcbeacfd188cbd53de56c1dbc7b94d
+			GIT_TAG f529358e9ac28b0809572c14a964ba7ba691adc4
 			UPDATE_COMMAND ""
 			PATCH_COMMAND ""
 			CONFIGURE_COMMAND ""
@@ -166,9 +168,6 @@ add_subdirectory(airdata)
 add_subdirectory(EKF)
 add_subdirectory(geo)
 add_subdirectory(geo_lookup)
-add_subdirectory(l1)
-add_subdirectory(tecs)
-add_subdirectory(validation)
 
 if(BUILD_TESTING AND CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
 	add_subdirectory(test)

@@ -55,6 +55,8 @@ using matrix::Vector2f;
 using matrix::Vector3f;
 using matrix::wrap_pi;
 
+enum velocity_frame_t {LOCAL_FRAME_FRD, BODY_FRAME_FRD};
+
 struct gps_message {
 	uint64_t time_usec;
 	int32_t lat;		///< Latitude in 1E-7 degrees
@@ -139,11 +141,12 @@ struct flowSample {
 
 struct extVisionSample {
 	Vector3f pos;	///< XYZ position in external vision's local reference frame (m) - Z must be aligned with down axis
-	Vector3f vel;	///< XYZ velocity in external vision's local reference frame (m/sec) - Z must be aligned with down axis
+	Vector3f vel;	///< FRD velocity in reference frame defined in vel_frame variable (m/sec) - Z must be aligned with down axis
 	Quatf quat;		///< quaternion defining rotation from body to earth frame
 	Vector3f posVar;	///< XYZ position variances (m**2)
-	Vector3f velVar;	///< XYZ velocity variances ((m/sec)**2)
+	Matrix3f velCov;	///< XYZ velocity covariances ((m/sec)**2)
 	float angVar;		///< angular heading variance (rad**2)
+	velocity_frame_t vel_frame = BODY_FRAME_FRD;
 	uint64_t time_us;	///< timestamp of the measurement (uSec)
 };
 
@@ -364,8 +367,9 @@ struct parameters {
 
 	// Parameters used to control when yaw is reset to the EKF-GSF yaw estimator value
 	float EKFGSF_tas_default{15.0f};	///< default airspeed value assumed during fixed wing flight if no airspeed measurement available (m/s)
-	unsigned EKFGSF_reset_delay{1000000};	///< Number of uSec of bad innovations on main filter inpost takeoff phase before yaw is reset to EKF-GSF value
+	unsigned EKFGSF_reset_delay{1000000};	///< Number of uSec of bad innovations on main filter in immediate post-takeoff phase before yaw is reset to EKF-GSF value
 	float EKFGSF_yaw_err_max{0.262f}; 	///< Composite yaw 1-sigma uncertainty threshold used to check for convergence (rad)
+	unsigned EKFGSF_reset_count_limit{3};	///< Maximum number of times the yaw can be reset to the EKF-GSF yaw estimator value
 };
 
 struct stateSample {
@@ -491,6 +495,14 @@ union ekf_solution_status {
 		uint16_t accel_error        : 1; ///< 11 - True if the EKF has detected bad accelerometer data
 	} flags;
 	uint16_t value;
+};
+
+union terrain_fusion_status_u {
+	struct {
+		bool range_finder: 1;	///< 0 - true if we are fusing range finder data
+		bool flow: 1;			///< 1 - true if we are fusing flow data
+	} flags;
+	uint8_t value;
 };
 
 }

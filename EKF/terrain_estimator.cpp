@@ -52,9 +52,10 @@ bool Ekf::initHagl()
 		_terrain_vpos = _state.pos(2) + _params.rng_gnd_clearance;
 		// use the ground clearance value as our uncertainty
 		_terrain_var = sq(_params.rng_gnd_clearance);
+		_time_last_fake_hagl_fuse = _time_last_imu;
 		initialized = true;
 
-	} else if ((_params.terrain_fusion_mode & TerrainFusionMask::TerrainFuseRangeFinder)
+	} else if (shouldUseRangeFinderForHagl()
 		   && _range_sensor.isDataHealthy()) {
 		// if we have a fresh measurement, use it to initialise the terrain estimator
 		_terrain_vpos = _state.pos(2) + _range_sensor.getDistBottom();
@@ -63,7 +64,7 @@ bool Ekf::initHagl()
 		// success
 		initialized = true;
 
-	} else if ((_params.terrain_fusion_mode & TerrainFusionMask::TerrainFuseOpticalFlow)
+	} else if (shouldUseOpticalFlowForHagl()
 		   && _flow_for_terrain_data_ready) {
 		// initialise terrain vertical position to origin as this is the best guess we have
 		_terrain_vpos = fmaxf(0.0f,  _state.pos(2));
@@ -80,6 +81,16 @@ bool Ekf::initHagl()
 	}
 
 	return initialized;
+}
+
+bool Ekf::shouldUseRangeFinderForHagl() const
+{
+	return (_params.terrain_fusion_mode & TerrainFusionMask::TerrainFuseRangeFinder);
+}
+
+bool Ekf::shouldUseOpticalFlowForHagl() const
+{
+	return (_params.terrain_fusion_mode & TerrainFusionMask::TerrainFuseOpticalFlow);
 }
 
 void Ekf::runTerrainEstimator()
@@ -109,11 +120,13 @@ void Ekf::runTerrainEstimator()
 		_terrain_var = math::constrain(_terrain_var, 0.0f, 1e4f);
 
 		// Fuse range finder data if available
-		if (_range_sensor.isDataHealthy()) {
+		if (shouldUseRangeFinderForHagl()
+		    && _range_sensor.isDataHealthy()) {
 			fuseHagl();
 		}
 
-		if (_flow_for_terrain_data_ready) {
+		if (shouldUseOpticalFlowForHagl()
+		    && _flow_for_terrain_data_ready) {
 			fuseFlowForTerrain();
 			_flow_for_terrain_data_ready = false;
 		}
@@ -152,7 +165,7 @@ void Ekf::fuseHagl()
 
 	if (_hagl_test_ratio <= 1.0f) {
 		// calculate the Kalman gain
-		float gain = _terrain_var / _hagl_innov_var;
+		const float gain = _terrain_var / _hagl_innov_var;
 		// correct the state
 		_terrain_vpos -= gain * _hagl_innov;
 		// correct the variance
@@ -178,7 +191,7 @@ void Ekf::fuseFlowForTerrain()
 	// calculate optical LOS rates using optical flow rates that have had the body angular rate contribution removed
 	// correct for gyro bias errors in the data used to do the motion compensation
 	// Note the sign convention used: A positive LOS rate is a RH rotation of the scene about that axis.
-	const Vector2f opt_flow_rate = Vector2f{_flow_compensated_XY_rad} / _flow_sample_delayed.dt + Vector2f{_flow_gyro_bias};
+	const Vector2f opt_flow_rate = _flow_compensated_XY_rad / _flow_sample_delayed.dt + Vector2f(_flow_gyro_bias);
 
 	// get latest estimated orientation
 	const float q0 = _state.quat_nominal(0);
@@ -190,7 +203,7 @@ void Ekf::fuseFlowForTerrain()
 	const float R_LOS = calcOptFlowMeasVar();
 
 	// get rotation matrix from earth to body
-	const Dcmf earth_to_body = quat_to_invrotmat(_state.quat_nominal);
+	const Dcmf earth_to_body = quatToInverseRotMat(_state.quat_nominal);
 
 	// calculate the sensor position relative to the IMU
 	const Vector3f pos_offset_body = _params.flow_pos_body - _params.imu_pos_body;
@@ -209,64 +222,64 @@ void Ekf::fuseFlowForTerrain()
 
 	// constrain terrain to minimum allowed value and predict height above ground
 	_terrain_vpos = fmaxf(_terrain_vpos, _params.rng_gnd_clearance + _state.pos(2));
-	const float pred_hagl = _terrain_vpos - _state.pos(2);
+	const float pred_hagl_inv = 1.f / (_terrain_vpos - _state.pos(2));
 
 	// Calculate observation matrix for flow around the vehicle x axis
-	const float Hx = vel_body(1) * t0 / (pred_hagl * pred_hagl);
+	const float Hx = vel_body(1) * t0 * pred_hagl_inv * pred_hagl_inv;
 
 	// Constrain terrain variance to be non-negative
 	_terrain_var = fmaxf(_terrain_var, 0.0f);
 
 	// Cacluate innovation variance
-	_flow_innov_var[0] = Hx * Hx * _terrain_var + R_LOS;
+	_flow_innov_var(0) = Hx * Hx * _terrain_var + R_LOS;
 
 	// calculate the kalman gain for the flow x measurement
-	const float Kx = _terrain_var * Hx / _flow_innov_var[0];
+	const float Kx = _terrain_var * Hx / _flow_innov_var(0);
 
 	// calculate prediced optical flow about x axis
-	const float pred_flow_x = vel_body(1) * earth_to_body(2, 2) / pred_hagl;
+	const float pred_flow_x = vel_body(1) * earth_to_body(2, 2) * pred_hagl_inv;
 
 	// calculate flow innovation (x axis)
-	_flow_innov[0] = pred_flow_x - opt_flow_rate(0);
+	_flow_innov(0) = pred_flow_x - opt_flow_rate(0);
 
 	// calculate correction term for terrain variance
 	const float KxHxP =  Kx * Hx * _terrain_var;
 
 	// innovation consistency check
 	const float gate_size = fmaxf(_params.flow_innov_gate, 1.0f);
-	float flow_test_ratio = sq(_flow_innov[0]) / (sq(gate_size) * _flow_innov_var[0]);
+	float flow_test_ratio = sq(_flow_innov(0)) / (sq(gate_size) * _flow_innov_var(0));
 
 	// do not perform measurement update if badly conditioned
 	if (flow_test_ratio <= 1.0f) {
-		_terrain_vpos += Kx * _flow_innov[0];
+		_terrain_vpos += Kx * _flow_innov(0);
 		// guard against negative variance
 		_terrain_var = fmaxf(_terrain_var - KxHxP, 0.0f);
 		_time_last_of_fuse = _time_last_imu;
 	}
 
 	// Calculate observation matrix for flow around the vehicle y axis
-	const float Hy = -vel_body(0) * t0 / (pred_hagl * pred_hagl);
+	const float Hy = -vel_body(0) * t0 * pred_hagl_inv * pred_hagl_inv;
 
 	// Calculuate innovation variance
-	_flow_innov_var[1] = Hy * Hy * _terrain_var + R_LOS;
+	_flow_innov_var(1) = Hy * Hy * _terrain_var + R_LOS;
 
 	// calculate the kalman gain for the flow y measurement
-	const float Ky = _terrain_var * Hy / _flow_innov_var[1];
+	const float Ky = _terrain_var * Hy / _flow_innov_var(1);
 
 	// calculate prediced optical flow about y axis
-	const float pred_flow_y = -vel_body(0) * earth_to_body(2, 2) / pred_hagl;
+	const float pred_flow_y = -vel_body(0) * earth_to_body(2, 2) * pred_hagl_inv;
 
 	// calculate flow innovation (y axis)
-	_flow_innov[1] = pred_flow_y - opt_flow_rate(1);
+	_flow_innov(1) = pred_flow_y - opt_flow_rate(1);
 
 	// calculate correction term for terrain variance
 	const float KyHyP =  Ky * Hy * _terrain_var;
 
 	// innovation consistency check
-	flow_test_ratio = sq(_flow_innov[1]) / (sq(gate_size) * _flow_innov_var[1]);
+	flow_test_ratio = sq(_flow_innov(1)) / (sq(gate_size) * _flow_innov_var(1));
 
 	if (flow_test_ratio <= 1.0f) {
-		_terrain_vpos += Ky * _flow_innov[1];
+		_terrain_vpos += Ky * _flow_innov(1);
 		// guard against negative variance
 		_terrain_var = fmaxf(_terrain_var - KyHyP, 0.0f);
 		_time_last_of_fuse = _time_last_imu;
@@ -289,6 +302,12 @@ void Ekf::updateTerrainValidity()
 						    && !_control_status.flags.opt_flow;
 
 	_hagl_valid = (_terrain_initialised && (recent_range_fusion || recent_flow_for_terrain_fusion));
+
+	_hagl_sensor_status.flags.range_finder = shouldUseRangeFinderForHagl()
+						 && recent_range_fusion
+						 && (_time_last_fake_hagl_fuse != _time_last_hagl_fuse);
+	_hagl_sensor_status.flags.flow = shouldUseOpticalFlowForHagl()
+					 && recent_flow_for_terrain_fusion;
 }
 
 // get the estimated vertical position of the terrain relative to the NED origin

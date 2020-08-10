@@ -15,7 +15,17 @@ Gps::~Gps()
 
 void Gps::send(uint64_t time)
 {
+	const float dt = static_cast<float>(time - _gps_data.time_usec) * 1e-6f;
+
 	_gps_data.time_usec = time;
+
+	if (fabsf(_gps_pos_rate(0)) > FLT_EPSILON || fabsf(_gps_pos_rate(1)) > FLT_EPSILON) {
+		stepHorizontalPositionByMeters(Vector2f(_gps_pos_rate) * dt);
+	}
+	if (fabsf(_gps_pos_rate(2)) > FLT_EPSILON) {
+		stepHeightByMeters(-_gps_pos_rate(2) * dt);
+	}
+
 	_ekf->setGpsData(_gps_data);
 }
 
@@ -42,6 +52,14 @@ void Gps::setLongitude(int32_t lon)
 void Gps::setVelocity(const Vector3f& vel)
 {
 	_gps_data.vel_ned = vel;
+}
+
+void Gps::setYaw(float yaw) {
+	_gps_data.yaw = yaw;
+}
+
+void Gps::setYawOffset(float yaw_offset) {
+	_gps_data.yaw_offset = yaw_offset;
 }
 
 void Gps::setFixType(int n)
@@ -81,7 +99,6 @@ void Gps::stepHorizontalPositionByMeters(Vector2f hpos_change)
 	_gps_data.lat = static_cast<int32_t>(lat_new * 1e7);
 }
 
-
 gps_message Gps::getDefaultGpsData()
 {
 	gps_message gps_data{};
@@ -89,7 +106,7 @@ gps_message Gps::getDefaultGpsData()
 	gps_data.lat = 473566094;
 	gps_data.lon = 85190237;
 	gps_data.alt = 422056;
-	gps_data.yaw = 0.0f;
+	gps_data.yaw = NAN;
 	gps_data.yaw_offset = 0.0f;
 	gps_data.fix_type = 3;
 	gps_data.eph = 0.5f;

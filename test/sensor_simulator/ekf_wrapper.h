@@ -64,6 +64,10 @@ public:
 	void disableGpsFusion();
 	bool isIntendingGpsFusion() const;
 
+	void enableGpsHeadingFusion();
+	void disableGpsHeadingFusion();
+	bool isIntendingGpsHeadingFusion() const;
+
 	void enableFlowFusion();
 	void disableFlowFusion();
 	bool isIntendingFlowFusion() const;
@@ -80,13 +84,28 @@ public:
 	void disableExternalVisionHeadingFusion();
 	bool isIntendingExternalVisionHeadingFusion() const;
 
+	bool isIntendingMagHeadingFusion() const;
+	bool isIntendingMag3DFusion() const;
+
 	void enableExternalVisionAlignment();
 	void disableExternalVisionAlignment();
 
 	bool isWindVelocityEstimated() const;
 
+	void enableTerrainRngFusion();
+	void disableTerrainRngFusion();
+	bool isIntendingTerrainRngFusion() const;
+
+	void enableTerrainFlowFusion();
+	void disableTerrainFlowFusion();
+	bool isIntendingTerrainFlowFusion() const;
+
 	Eulerf getEulerAngles() const;
+	float getYawAngle() const;
 	matrix::Vector<float, 4> getQuaternionVariance() const;
+	int getQuaternionResetCounter() const;
+
+	matrix::Vector3f getDeltaVelBiasVariance() const;
 
 private:
 	std::shared_ptr<Ekf> _ekf;
