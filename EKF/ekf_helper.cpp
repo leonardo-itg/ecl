@@ -1144,7 +1144,7 @@ void Ekf::update_deadreckoning_status()
 	}
 
 	// report if we have been deadreckoning for too long, initial state is deadreckoning until aiding is present
-	_deadreckon_time_exceeded = (_time_last_aiding == 0) || isTimedOut(_time_last_aiding, (uint64_t)_params.valid_timeout_max);
+	_deadreckon_time_exceeded = false; //(_time_last_aiding == 0) || isTimedOut(_time_last_aiding, (uint64_t)_params.valid_timeout_max);
 }
 
 // calculate the variances for the rotation vector equivalent
